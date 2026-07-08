@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>계약콕검</title>
+  <title>계약콕검 v0.1.5</title>
   <meta name="description" content="공사·용역·물품 계약서류 확인도구" />
   <link rel="stylesheet" href="./style.css" />
 </head>
@@ -121,11 +121,11 @@
           <input id="fileInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.hwp,.hwpx,.doc,.docx,.xls,.xlsx,.csv,.txt" />
           <div class="dropzone__inner">
             <strong>서류 파일을 여기에 놓거나 선택하세요</strong>
-            <span>파일명 우선 매칭 · 스캔 PDF/이미지는 OCR로 제목만 확인</span>
+            <span>파일명으로 맞는 서류는 자동 첨부확인 · 스캔 PDF/이미지는 OCR로 제목만 확인</span>
             <button type="button" id="chooseFileBtn">파일 선택</button>
           </div>
         </div>
-        <p class="helper-text">스캔파일은 제목만 확인합니다. 최종 판단은 담당자가 직접 확인하세요.</p>
+        <p class="helper-text">파일명을 읽어 맞는 서류는 바로 체크리스트에 첨부확인으로 표시합니다. 스캔파일은 제목만 확인하며 최종 판단은 담당자가 직접 확인하세요.</p>
         <div class="file-list" id="fileList"></div>
       </section>
 
@@ -150,6 +150,7 @@
           <strong>수의계약 통합서약서</strong>
           <span>수의계약 각서, 수의계약 체결제한 여부 확인서, 청렴서약서, 조세포탈 여부 확인 서약서는 수의계약 통합서약서로 대체 가능하게 표시합니다.</span>
         </div>
+        <div class="stage-roadmap" id="stageRoadmap" aria-label="단계별 바로가기와 진행률"></div>
         <div id="checklistContainer" class="checklist-container"></div>
       </section>
     </main>
@@ -158,6 +159,7 @@
 
     <footer class="footer no-print">
       <p>본 도구는 서울특별시교육청 계약업무 처리지침(2023.12.27. 개정) [붙임4] 계약 구비서류를 바탕으로 한 서류 확인 보조도구입니다. 계약금액, 계약방법, 사업 성격, 최신 지침 개정 여부에 따라 실제 징구 서류가 달라질 수 있으므로 최종 확인은 담당자가 직접 수행해야 합니다.</p>
+      <p class="footer-credit">제작: senvip · GitHub: <a href="https://github.com/sen-vip/contract-kockgum" target="_blank" rel="noopener noreferrer">sen-vip/contract-kockgum</a></p>
     </footer>
   </div>
 

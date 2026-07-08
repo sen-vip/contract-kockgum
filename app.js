@@ -223,6 +223,31 @@ function normalizeText(text = "") {
     .replace(/[\s\-_.·ㆍ,()\[\]{}<>《》「」『』:;\/\\|~!@#$%^&*+=?"'`]/g, "");
 }
 
+function onlyDigits(value = "") {
+  return String(value).replace(/[^0-9]/g, "");
+}
+
+function formatCurrencyText(value = "") {
+  const digits = onlyDigits(value);
+  if (!digits) return "";
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function formatAmountInput(input) {
+  const before = input.value;
+  const formatted = formatCurrencyText(before);
+  input.value = formatted;
+  state.info.amount = formatted;
+}
+
+function scrollToUploadResults() {
+  const fileList = $("#fileList");
+  if (!fileList) return;
+  window.setTimeout(() => {
+    fileList.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 90);
+}
+
 function getDocId(type, index) {
   return `${type}-${index}`;
 }
@@ -240,12 +265,20 @@ function getDocState(docId) {
 }
 
 function loadState() {
-  const base = { activeType: "construction", info: {}, docs: {}, files: [], collapsed: {} };
+  const base = { activeType: "construction", info: {}, docs: {}, files: [], collapsed: {}, expandedDocs: {} };
   try {
     const raw = localStorage.getItem(APP_KEY);
     if (!raw) return base;
     const parsed = JSON.parse(raw);
-    return { ...base, ...parsed, info: parsed.info || {}, docs: parsed.docs || {}, files: parsed.files || [], collapsed: parsed.collapsed || {} };
+    return {
+      ...base,
+      ...parsed,
+      info: parsed.info || {},
+      docs: parsed.docs || {},
+      files: parsed.files || [],
+      collapsed: parsed.collapsed || {},
+      expandedDocs: parsed.expandedDocs || {},
+    };
   } catch (error) {
     console.warn("저장상태를 불러오지 못했습니다.", error);
     return base;
@@ -293,9 +326,16 @@ function bindEvents() {
   $("#infoForm").addEventListener("input", (event) => {
     const target = event.target;
     if (!target.name) return;
-    state.info[target.name] = target.value;
+    if (target.name === "amount") {
+      formatAmountInput(target);
+    } else {
+      state.info[target.name] = target.value;
+    }
     persistState();
-    if (target.name === "stageFilter") renderChecklist();
+    if (target.name === "stageFilter") {
+      renderStageRoadmap();
+      renderChecklist();
+    }
     renderSummary();
   });
 
@@ -339,13 +379,14 @@ function hydrateInfoForm() {
   const fields = ["title", "vendor", "amount", "method", "contractWritten", "stageFilter", "memo"];
   fields.forEach((field) => {
     const input = form.elements[field];
-    if (input) input.value = state.info[field] || (field === "stageFilter" ? "전체" : "");
+    if (input) input.value = field === "amount" ? formatCurrencyText(state.info[field] || "") : (state.info[field] || (field === "stageFilter" ? "전체" : ""));
   });
 }
 
 function renderAll() {
   renderTabs();
   renderStageFilter();
+  renderStageRoadmap();
   renderChecklist();
   renderFiles();
   renderSummary();
@@ -364,6 +405,92 @@ function renderTabs() {
 
 function getStages(type = state.activeType) {
   return [...new Set(checklistData[type].map((item) => item.stage))];
+}
+
+function getStageStats(type, stage) {
+  const docs = checklistData[type]
+    .map((doc, index) => ({ doc, docId: getDocId(type, index) }))
+    .filter(({ doc }) => doc.stage === stage);
+  const done = docs.filter(({ docId }) => DONE_STATUSES.has(getDocState(docId).status)).length;
+  const total = docs.length;
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  return { done, total, percent };
+}
+
+function getStageAnchorId(type, stage) {
+  const index = getStages(type).indexOf(stage);
+  return `stage-${type}-${index}`;
+}
+
+function getStageScrollOffset() {
+  const roadmap = $("#stageRoadmap");
+  const roadmapHeight = roadmap ? roadmap.offsetHeight : 0;
+  // 단계 바로가기 바가 sticky로 떠 있기 때문에, 단계 제목이 가려지지 않도록 여유를 둔다.
+  return Math.min(280, Math.max(150, roadmapHeight + 104));
+}
+
+function scrollToStageSection(stage) {
+  const target = document.getElementById(getStageAnchorId(state.activeType, stage));
+  if (!target) return;
+  const top = target.getBoundingClientRect().top + window.scrollY - getStageScrollOffset();
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+}
+
+function scrollToChecklistTop() {
+  const panel = $(".checklist-panel");
+  if (!panel) return;
+  const top = panel.getBoundingClientRect().top + window.scrollY - 20;
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+}
+
+function renderStageRoadmap() {
+  const container = $("#stageRoadmap");
+  if (!container) return;
+  const type = state.activeType;
+  const stages = getStages(type);
+  container.innerHTML = `
+    <div class="stage-roadmap__head">
+      <div>
+        <strong>상단 바로가기</strong>
+        <span>단계별 진행률을 누르면 해당 서류 묶음으로 이동합니다.</span>
+      </div>
+      <button type="button" class="ghost-button" data-stage-jump="__top">처음으로</button>
+    </div>
+    <div class="stage-roadmap__grid">
+      ${stages.map((stage) => {
+        const stats = getStageStats(type, stage);
+        const isFiltered = (state.info.stageFilter || "전체") === stage;
+        return `
+          <button class="stage-jump ${isFiltered ? "active" : ""}" type="button" data-stage-jump="${escapeAttr(stage)}">
+            <span class="stage-jump__name">${escapeHtml(stage)}</span>
+            <span class="stage-jump__meta">${stats.done}/${stats.total} · ${stats.percent}%</span>
+            <span class="stage-jump__bar" aria-hidden="true"><i style="width:${stats.percent}%"></i></span>
+          </button>
+        `;
+      }).join("")}
+    </div>
+  `;
+
+  $$('[data-stage-jump]', container).forEach((button) => {
+    button.addEventListener("click", () => {
+      const stage = button.dataset.stageJump;
+      if (stage === "__top") {
+        scrollToChecklistTop();
+        return;
+      }
+      if ((state.info.stageFilter || "전체") !== "전체") {
+        state.info.stageFilter = "전체";
+        persistState();
+        hydrateInfoForm();
+        renderStageRoadmap();
+        renderChecklist();
+        renderSummary();
+      }
+      window.setTimeout(() => {
+        scrollToStageSection(stage);
+      }, 40);
+    });
+  });
 }
 
 function renderStageFilter() {
@@ -393,11 +520,15 @@ function renderChecklist() {
     const key = `${type}:${stage}`;
     const isCollapsed = state.collapsed[key] === true;
     const doneCount = items.filter(({ docId }) => DONE_STATUSES.has(getDocState(docId).status)).length;
+    const percent = items.length ? Math.round((doneCount / items.length) * 100) : 0;
     return `
-      <section class="stage-group ${isCollapsed ? "collapsed" : ""}" data-stage-key="${escapeAttr(key)}">
+      <section class="stage-group ${isCollapsed ? "collapsed" : ""}" id="${escapeAttr(getStageAnchorId(type, stage))}" data-stage-key="${escapeAttr(key)}">
         <button class="stage-header" type="button" data-action="toggle-stage">
-          <strong>${escapeHtml(stage)}</strong>
-          <span>${doneCount}/${items.length} 확인 <span class="chevron">▾</span></span>
+          <div class="stage-header__title">
+            <strong>${escapeHtml(stage)}</strong>
+            <em>${doneCount}/${items.length} · ${percent}% 확인</em>
+          </div>
+          <span class="stage-header__right"><span class="stage-mini-bar" aria-hidden="true"><i style="width:${percent}%"></i></span><span class="chevron">▾</span></span>
         </button>
         <div class="stage-body">
           ${items.map(({ doc, index, docId }) => renderDocCard(doc, index, docId)).join("")}
@@ -424,49 +555,80 @@ function renderDocCard(doc, index, docId) {
   const status = docState.status || "미확인";
   const files = docState.files || [];
   const displayNote = getDocNote(doc);
+  const isExpanded = state.expandedDocs?.[docId] === true;
+  const summaryParts = [];
+  if (files.length) summaryParts.push(`첨부 ${files.length}개${files[0] ? ` · ${files[0]}` : ""}`);
+  if (!files.length && doc.basis) summaryParts.push(`근거 ${doc.basis}`);
+  if (!files.length && !doc.basis && displayNote) summaryParts.push(displayNote);
+  if (!summaryParts.length) summaryParts.push("자세히에서 근거·비고·메모를 확인할 수 있어요.");
+
+  const quickButtons = [
+    ["확인완료", "확인"],
+    ["생략가능", "생략"],
+    ["해당없음", "해당없음"],
+    ["보류", "보류"],
+  ].map(([statusName, label]) => `
+    <button type="button" class="quick-status ${status === statusName ? "active" : ""}" data-status-set="${escapeAttr(statusName)}">${escapeHtml(label)}</button>
+  `).join("");
+
   return `
-    <article class="doc-card status-${escapeAttr(status)}" data-doc-id="${escapeAttr(docId)}">
+    <article class="doc-card status-${escapeAttr(status)} ${isExpanded ? "expanded" : "compact"}" data-doc-id="${escapeAttr(docId)}">
       <div class="doc-head">
         <div class="doc-title-wrap">
           <div class="doc-name">${index + 1}. ${escapeHtml(doc.name)}</div>
-          <div class="doc-detail">
-            ${doc.basis ? `<div><b>근거</b> ${escapeHtml(doc.basis)}</div>` : ""}
-            ${displayNote ? `<div><b>비고</b> ${escapeHtml(displayNote)}</div>` : ""}
-          </div>
+          <div class="doc-summary-line">${escapeHtml(summaryParts.join(" · "))}</div>
         </div>
-        <span class="status-pill" data-status="${escapeAttr(status)}">${escapeHtml(status)}</span>
+        <div class="doc-status-stack">
+          <span class="status-pill" data-status="${escapeAttr(status)}">${escapeHtml(status)}</span>
+          <button type="button" class="detail-toggle" data-toggle-doc-detail="${escapeAttr(docId)}">${isExpanded ? "접기" : "자세히"}</button>
+        </div>
       </div>
-      <div class="doc-buttons" role="group" aria-label="${escapeAttr(doc.name)} 상태 변경">
-        ${["확인완료", "생략가능", "해당없음", "보류"].map((statusName) => `
-          <button type="button" class="${status === statusName ? "active" : ""}" data-status-set="${escapeAttr(statusName)}">${escapeHtml(statusName)}</button>
-        `).join("")}
-        <button type="button" class="reset-status" data-status-set="미확인">초기화</button>
+      <div class="doc-inline-actions" role="group" aria-label="${escapeAttr(doc.name)} 빠른 상태 변경">
+        ${quickButtons}
       </div>
-      <div class="file-chips">
-        ${files.length ? files.map((fileName) => `
-          <span class="file-chip" title="${escapeAttr(fileName)}">📎 ${escapeHtml(fileName)} <button type="button" data-remove-file="${escapeAttr(fileName)}" aria-label="첨부 연결 해제">×</button></span>
-        `).join("") : `<span class="file-meta">연결된 파일 없음</span>`}
-      </div>
-      <div class="doc-note-row">
-        <textarea class="doc-note" rows="1" placeholder="담당자 메모" aria-label="${escapeAttr(doc.name)} 담당자 메모">${escapeHtml(docState.note || "")}</textarea>
+      <div class="doc-extra" ${isExpanded ? "" : "hidden"}>
+        <div class="doc-detail">
+          ${doc.basis ? `<div><b>근거</b> ${escapeHtml(doc.basis)}</div>` : ""}
+          ${displayNote ? `<div><b>비고</b> ${escapeHtml(displayNote)}</div>` : ""}
+        </div>
+        <div class="doc-buttons" role="group" aria-label="${escapeAttr(doc.name)} 상태 변경">
+          <button type="button" class="reset-status" data-status-set="미확인">초기화</button>
+        </div>
+        <div class="file-chips">
+          ${files.length ? files.map((fileName) => `
+            <span class="file-chip" title="${escapeAttr(fileName)}">📎 ${escapeHtml(fileName)} <button type="button" data-remove-file="${escapeAttr(fileName)}" aria-label="첨부 연결 해제">×</button></span>
+          `).join("") : `<span class="file-meta">연결된 파일 없음</span>`}
+        </div>
+        <div class="doc-note-row">
+          <textarea class="doc-note" rows="1" placeholder="담당자 메모" aria-label="${escapeAttr(doc.name)} 담당자 메모">${escapeHtml(docState.note || "")}</textarea>
+        </div>
       </div>
     </article>
   `;
 }
-
 function bindDocCardEvents(card) {
   const docId = card.dataset.docId;
   $$('[data-status-set]', card).forEach((button) => {
     button.addEventListener("click", () => {
       const docState = getDocState(docId);
       docState.status = button.dataset.statusSet;
+      if (docState.status !== "미확인") state.expandedDocs[docId] = false;
       persistState();
       renderChecklist();
+      renderStageRoadmap();
       renderSummary();
       renderPrintReport();
     });
   });
-  $$("[data-remove-file]", card).forEach((button) => {
+  const toggleButton = $('[data-toggle-doc-detail]', card);
+  if (toggleButton) {
+    toggleButton.addEventListener("click", () => {
+      state.expandedDocs[docId] = !state.expandedDocs[docId];
+      persistState();
+      renderChecklist();
+    });
+  }
+  $$('[data-remove-file]', card).forEach((button) => {
     button.addEventListener("click", () => {
       const fileName = button.dataset.removeFile;
       const docState = getDocState(docId);
@@ -486,11 +648,14 @@ function bindDocCardEvents(card) {
       renderAll();
     });
   });
-  $(".doc-note", card).addEventListener("input", (event) => {
-    getDocState(docId).note = event.target.value;
-    persistState();
-    renderPrintReport();
-  });
+  const note = $('.doc-note', card);
+  if (note) {
+    note.addEventListener("input", (event) => {
+      getDocState(docId).note = event.target.value;
+      persistState();
+      renderPrintReport();
+    });
+  }
 }
 
 function getDocNote(doc) {
@@ -530,11 +695,15 @@ function handleFiles(fileList) {
   const files = Array.from(fileList || []);
   if (!files.length) return;
 
+  let autoMatchedCount = 0;
+  let newFileCount = 0;
+
   files.forEach((file) => {
     const id = makeFileId(file);
     transientFiles.set(id, file);
     const existing = state.files.find((item) => item.id === id);
     if (existing) return;
+    newFileCount += 1;
 
     const match = findBestMatch(file.name, state.activeType);
     const record = {
@@ -572,12 +741,20 @@ function handleFiles(fileList) {
       record.suggestionScore = match.score;
     }
 
+    if (record.applied) autoMatchedCount += 1;
     state.files.unshift(record);
   });
 
   persistState();
   renderAll();
-  toast(`${files.length}개 파일을 확인했어요.`);
+  if (newFileCount) scrollToUploadResults();
+  if (autoMatchedCount) {
+    toast(`촤라락! ${autoMatchedCount}개 파일을 체크리스트에 자동 반영했어요.`);
+  } else if (newFileCount) {
+    toast(`${newFileCount}개 파일을 확인했어요. 미분류 파일만 직접 연결하면 돼요.`);
+  } else {
+    toast(`이미 추가된 파일이에요.`);
+  }
 
   autoOcrUnmatched(files).catch((error) => {
     console.warn(error);
@@ -612,7 +789,14 @@ async function autoOcrUnmatched(files) {
         continue;
       }
       const match = findBestMatch(record.ocrText, state.activeType);
-      if (match && match.score >= 45) {
+      if (match && match.score >= 65) {
+        record.matchedDocId = match.docId;
+        record.matchedDocIds = [match.docId];
+        record.applied = true;
+        record.status = "OCR 자동반영";
+        record.ocrStatus = "OCR 제목 자동 확인";
+        attachFileToDoc(match.docId, record.name, { silent: true });
+      } else if (match && match.score >= 45) {
         record.suggestionDocId = match.docId;
         record.suggestionScore = match.score;
         record.status = "OCR 추천";
@@ -638,7 +822,21 @@ function renderFiles() {
     return;
   }
 
-  list.innerHTML = state.files.map((file) => renderFileCard(file)).join("");
+  const autoApplied = state.files.filter((file) => file.applied || getMatchedDocIds(file).length > 0).length;
+  const pending = state.files.length - autoApplied;
+  const autoSummary = `
+    <div class="file-auto-summary">
+      <div>
+        <strong>자동분류 결과</strong>
+        <span>연결된 파일은 체크리스트에서 바로 <b>첨부확인</b>으로 표시됩니다.</span>
+      </div>
+      <div class="file-auto-summary__counts">
+        <span>자동반영 ${autoApplied}개</span>
+        <span>직접확인 ${pending}개</span>
+      </div>
+    </div>
+  `;
+  list.innerHTML = autoSummary + state.files.map((file) => renderFileCard(file)).join("");
 
   $$("[data-apply-suggestion]", list).forEach((button) => {
     button.addEventListener("click", () => {
@@ -693,39 +891,47 @@ function renderFileCard(file) {
   const suggestion = file.suggestionDocId ? getDocById(file.suggestionDocId) : null;
   const matchedDocIds = getMatchedDocIds(file);
   const matched = matchedDocIds.length === 1 ? getDocById(matchedDocIds[0]) : null;
+  const isApplied = file.applied || matchedDocIds.length > 0;
   const canOcr = transientFiles.has(file.id) && isOcrCandidate(transientFiles.get(file.id));
   const options = checklistData[state.activeType].map((doc, index) => {
     const docId = getDocId(state.activeType, index);
     return `<option value="${escapeAttr(docId)}">${escapeHtml(`${doc.stage} · ${doc.name}`)}</option>`;
   }).join("");
+  const appliedLabel = matchedDocIds.length > 1 ? `자동반영 ${matchedDocIds.length}건` : "자동반영";
+  const matchedText = matched
+    ? `✓ ${TYPE_LABELS[matched.type]} · ${matched.doc.stage} · ${matched.doc.name}`
+    : (matchedDocIds.length > 1 ? `✓ ${TYPE_LABELS[file.activeTypeAtUpload] || TYPE_LABELS[state.activeType]} · 통합서약서 대체 ${matchedDocIds.length}개 반영` : "");
+  const ocrText = file.ocrStatus && (!isApplied || file.ocrStatus.includes("OCR")) ? ` · OCR: ${file.ocrStatus}` : "";
 
   return `
-    <article class="file-card">
+    <article class="file-card ${isApplied ? "file-card--applied" : ""}">
       <div>
         <div class="file-card__title">
           <span class="file-name">${escapeHtml(file.name)}</span>
-          <span class="status-pill" data-status="${escapeAttr(file.applied ? "첨부확인" : (file.status.includes("미분류") ? "미확인" : "보류"))}">${escapeHtml(file.status)}</span>
+          <span class="status-pill" data-status="${escapeAttr(isApplied ? "첨부확인" : (file.status.includes("미분류") ? "미확인" : "보류"))}">${escapeHtml(isApplied ? appliedLabel : file.status)}</span>
         </div>
         <p class="file-meta">
-          ${formatBytes(file.size)} · ${escapeHtml(file.type || "파일")}
-          ${matched ? `<br>연결됨: ${escapeHtml(TYPE_LABELS[matched.type])} · ${escapeHtml(matched.doc.stage)} · ${escapeHtml(matched.doc.name)}` : ""}
-          ${matchedDocIds.length > 1 ? `<br>연결됨: ${escapeHtml(TYPE_LABELS[file.activeTypeAtUpload] || TYPE_LABELS[state.activeType])} · 수의계약 통합서약서 대체 서류 ${matchedDocIds.length}개` : ""}
-          ${suggestion && !file.applied ? `<br>추천: ${escapeHtml(suggestion.doc.stage)} · ${escapeHtml(suggestion.doc.name)} (${file.suggestionScore}점)` : ""}
-          ${file.ocrStatus ? `<br>OCR: ${escapeHtml(file.ocrStatus)}` : ""}
+          ${formatBytes(file.size)}${matchedText ? ` · ${escapeHtml(matchedText)}` : ""}
+          ${suggestion && !isApplied ? `<br>추천: ${escapeHtml(suggestion.doc.stage)} · ${escapeHtml(suggestion.doc.name)} (${file.suggestionScore}점)` : ""}
+          ${ocrText ? escapeHtml(ocrText) : ""}
         </p>
       </div>
       <div class="file-actions">
-        ${suggestion && !file.applied ? `<button type="button" class="primary" data-apply-suggestion="${escapeAttr(file.id)}">추천 적용</button>` : ""}
-        ${canOcr && !file.applied ? `<button type="button" class="soft" data-run-ocr="${escapeAttr(file.id)}">OCR 다시 확인</button>` : ""}
-        <button type="button" data-remove-upload="${escapeAttr(file.id)}">목록 삭제</button>
+        ${suggestion && !isApplied ? `<button type="button" class="primary" data-apply-suggestion="${escapeAttr(file.id)}">추천 적용</button>` : ""}
+        ${canOcr && !isApplied ? `<button type="button" class="soft" data-run-ocr="${escapeAttr(file.id)}">OCR</button>` : ""}
+        <button type="button" data-remove-upload="${escapeAttr(file.id)}">삭제</button>
       </div>
-      <div class="manual-connect">
-        <select class="manual-select" data-manual-select="${escapeAttr(file.id)}">
-          <option value="">수동으로 연결할 서류 선택</option>
-          ${options}
-        </select>
-        <button type="button" class="ghost-button" data-manual-connect="${escapeAttr(file.id)}">연결</button>
-      </div>
+      ${isApplied ? `
+        <div class="auto-connect-note">체크리스트 반영 완료 · 잘못 연결되면 삭제 후 다시 넣거나 서류 카드에서 첨부를 해제하세요.</div>
+      ` : `
+        <div class="manual-connect">
+          <select class="manual-select" data-manual-select="${escapeAttr(file.id)}">
+            <option value="">자동분류 실패 시 직접 연결할 서류 선택</option>
+            ${options}
+          </select>
+          <button type="button" class="ghost-button" data-manual-connect="${escapeAttr(file.id)}">연결</button>
+        </div>
+      `}
     </article>
   `;
 }
