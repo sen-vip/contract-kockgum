@@ -165,12 +165,12 @@ const manualAliases = {
   "계좌 사본(예금주 확인)": ["계좌사본", "통장사본", "예금주"],
   "착공신고서(착공계)": ["착공계", "착공신고서"],
   "현장기술자 지정신고서": ["현장기술자", "기술자지정"],
-  "공사공정예정표": ["공정예정표", "예정공정표"],
+  "공사공정예정표": ["공정예정표", "예정공정표", "예정 공정표", "공정표", "공사 예정 공정표"],
   "착공 전 현장사진": ["착공사진", "공사전사진", "현장사진"],
   "직접시공계획서": ["직접시공"],
   "전기, 수도료 납부 합의서(또는 미사용 각서)": ["전기수도료", "수도료", "미사용각서", "납부합의서"],
   "노무비 구분관리 및 지급확인제 합의서": ["노무비구분관리", "지급확인제", "적용제외확인서"],
-  "공사(용역)안전·보건 체크리스트": ["안전보건체크리스트", "공사용역안전보건", "안전·보건"],
+  "공사(용역)안전·보건 체크리스트": ["안전보건체크리스트", "공사용역안전보건", "안전·보건", "산업재해예방체크리스트", "일반산업재해예방체크리스트", "산업재해체크리스트", "산업재해 예방 체크리스트", "일반 산업재해 예방 체크리스트", "안전보건확보", "안전보건"],
   "준공계": ["준공신고서"],
   "준공검사원(의뢰서)": ["준공검사원", "준공검사의뢰서"],
   "준공내역서ㆍ준공정산동의서": ["준공내역서", "준공정산동의서"],
@@ -370,7 +370,9 @@ function bindEvents() {
   });
   $("#exportJsonBtn").addEventListener("click", exportJson);
   $("#importJsonInput").addEventListener("change", importJson);
-  $("#resetBtn").addEventListener("click", resetAll);
+  $("#resetDocsBtn").addEventListener("click", resetDocsOnly);
+  $("#resetInfoBtn").addEventListener("click", resetInfoOnly);
+  $("#resetAllBtn").addEventListener("click", resetAll);
   $("#expandAllBtn").addEventListener("click", toggleExpandAll);
 }
 
@@ -443,6 +445,12 @@ function scrollToChecklistTop() {
   window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
 }
 
+function scrollToPageTop() {
+  const top = $("#appTop") || document.body;
+  const y = top.getBoundingClientRect().top + window.scrollY - 12;
+  window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+}
+
 function renderStageRoadmap() {
   const container = $("#stageRoadmap");
   if (!container) return;
@@ -454,7 +462,10 @@ function renderStageRoadmap() {
         <strong>상단 바로가기</strong>
         <span>단계별 진행률을 누르면 해당 서류 묶음으로 이동합니다.</span>
       </div>
-      <button type="button" class="ghost-button" data-stage-jump="__top">처음으로</button>
+      <div class="stage-roadmap__tools">
+        <button type="button" class="ghost-button" data-stage-jump="__checklistTop">체크리스트</button>
+        <button type="button" class="ghost-button top-button" data-stage-jump="__pageTop">맨위로</button>
+      </div>
     </div>
     <div class="stage-roadmap__grid">
       ${stages.map((stage) => {
@@ -474,8 +485,12 @@ function renderStageRoadmap() {
   $$('[data-stage-jump]', container).forEach((button) => {
     button.addEventListener("click", () => {
       const stage = button.dataset.stageJump;
-      if (stage === "__top") {
+      if (stage === "__checklistTop") {
         scrollToChecklistTop();
+        return;
+      }
+      if (stage === "__pageTop") {
+        scrollToPageTop();
         return;
       }
       if ((state.info.stageFilter || "전체") !== "전체") {
@@ -635,7 +650,7 @@ function bindDocCardEvents(card) {
       docState.files = (docState.files || []).filter((name) => name !== fileName);
       if (docState.status === "첨부확인" && docState.files.length === 0) docState.status = "미확인";
       state.files.forEach((file) => {
-        if (file.name !== fileName) return;
+        if (file.name !== getAttachmentBase(fileName)) return;
         const ids = getMatchedDocIds(file);
         if (!ids.includes(docId)) return;
         const nextIds = ids.filter((id) => id !== docId);
@@ -766,52 +781,88 @@ async function autoOcrUnmatched(files) {
   for (const file of files) {
     const id = makeFileId(file);
     const record = state.files.find((item) => item.id === id);
-    if (!record || record.applied || record.ocrText) continue;
+    if (!record || record.ocrText) continue;
     if (!isOcrCandidate(file)) continue;
 
     record.ocrStatus = "OCR 확인 중...";
-    record.status = record.status === "미분류" ? "OCR 확인 중" : record.status;
+    if (!record.applied) record.status = record.status === "미분류" ? "OCR 확인 중" : record.status;
     persistState();
     renderFiles();
 
     try {
-      const text = await extractTitleText(file);
-      record.ocrText = text.slice(0, 1000);
-      if (isIntegratedPledgeText(record.ocrText)) {
-        const docIds = attachIntegratedPledgeToDocs(record.name, state.activeType);
-        record.matchedDocIds = docIds;
-        record.matchedDocId = docIds[0] || "";
-        record.applied = docIds.length > 0;
-        record.status = docIds.length ? "수의계약 통합서약서 OCR 반영" : "미분류";
-        record.ocrStatus = docIds.length ? "수의계약 통합서약서 제목 확인" : "제목 확인 실패";
-        persistState();
-        renderAll();
-        continue;
+      const pageTexts = await extractTitleTexts(file);
+      record.pageResults = [];
+      record.ocrText = pageTexts.map((page) => `[${page.pageLabel}] ${page.text}`).join("\n\n").slice(0, 2000);
+
+      const autoDocIds = new Set(getMatchedDocIds(record));
+      let autoCount = 0;
+      let recommendCount = 0;
+
+      for (const page of pageTexts) {
+        const pageText = page.text || "";
+        const pageResult = {
+          page: page.page,
+          pageLabel: page.pageLabel,
+          title: extractLikelyTitle(pageText),
+          text: pageText.slice(0, 450),
+          status: "제목 확인 실패",
+          docId: "",
+          score: 0,
+        };
+
+        if (isIntegratedPledgeText(pageText)) {
+          const docIds = attachIntegratedPledgeToDocs(record.name, state.activeType, page.pageLabel);
+          docIds.forEach((docId) => autoDocIds.add(docId));
+          pageResult.status = "통합서약서 자동반영";
+          pageResult.docId = docIds[0] || "";
+          pageResult.score = 96;
+          autoCount += docIds.length;
+          record.pageResults.push(pageResult);
+          continue;
+        }
+
+        const match = findBestMatch(pageText, state.activeType);
+        if (match && match.score >= 65) {
+          cleanupGenericAttachmentForFile(record.name);
+          attachFileToDoc(match.docId, record.name, { pageLabel: page.pageLabel, silent: true });
+          autoDocIds.add(match.docId);
+          pageResult.status = "페이지 OCR 자동반영";
+          pageResult.docId = match.docId;
+          pageResult.score = match.score;
+          autoCount += 1;
+        } else if (match && match.score >= 45) {
+          pageResult.status = "페이지 OCR 추천";
+          pageResult.docId = match.docId;
+          pageResult.score = match.score;
+          recommendCount += 1;
+          if (!record.suggestionDocId) {
+            record.suggestionDocId = match.docId;
+            record.suggestionScore = match.score;
+          }
+        }
+        record.pageResults.push(pageResult);
       }
-      const match = findBestMatch(record.ocrText, state.activeType);
-      if (match && match.score >= 65) {
-        record.matchedDocId = match.docId;
-        record.matchedDocIds = [match.docId];
-        record.applied = true;
-        record.status = "OCR 자동반영";
-        record.ocrStatus = "OCR 제목 자동 확인";
-        attachFileToDoc(match.docId, record.name, { silent: true });
-      } else if (match && match.score >= 45) {
-        record.suggestionDocId = match.docId;
-        record.suggestionScore = match.score;
-        record.status = "OCR 추천";
-        record.ocrStatus = "OCR 제목 추천 완료";
+
+      record.matchedDocIds = [...autoDocIds];
+      record.matchedDocId = record.matchedDocIds[0] || "";
+      record.applied = record.matchedDocIds.length > 0;
+      if (autoCount) {
+        record.status = `페이지 OCR 자동반영 ${autoCount}건`;
+        record.ocrStatus = `페이지별 제목 확인 · 자동반영 ${autoCount}건`;
+      } else if (recommendCount) {
+        record.status = "페이지 OCR 추천";
+        record.ocrStatus = `페이지별 제목 추천 ${recommendCount}건`;
       } else {
-        record.status = "미분류";
+        record.status = record.applied ? record.status : "미분류";
         record.ocrStatus = "제목 확인 실패";
       }
     } catch (error) {
       console.warn("OCR 실패", error);
-      record.status = "미분류";
+      if (!record.applied) record.status = "미분류";
       record.ocrStatus = "OCR 사용 불가 또는 실패";
     }
     persistState();
-    renderFiles();
+    renderAll();
   }
 }
 
@@ -861,6 +912,9 @@ function renderFiles() {
         toast("새로고침 후에는 보안상 원본 파일을 다시 선택해야 OCR이 가능해요.");
         return;
       }
+      record.ocrText = "";
+      record.pageResults = [];
+      record.ocrStatus = "";
       await autoOcrUnmatched([file]);
     });
   });
@@ -897,11 +951,10 @@ function renderFileCard(file) {
     const docId = getDocId(state.activeType, index);
     return `<option value="${escapeAttr(docId)}">${escapeHtml(`${doc.stage} · ${doc.name}`)}</option>`;
   }).join("");
+  const pageResultHtml = renderPageResults(file.pageResults || []);
   const appliedLabel = matchedDocIds.length > 1 ? `자동반영 ${matchedDocIds.length}건` : "자동반영";
-  const matchedText = matched
-    ? `✓ ${TYPE_LABELS[matched.type]} · ${matched.doc.stage} · ${matched.doc.name}`
-    : (matchedDocIds.length > 1 ? `✓ ${TYPE_LABELS[file.activeTypeAtUpload] || TYPE_LABELS[state.activeType]} · 통합서약서 대체 ${matchedDocIds.length}개 반영` : "");
-  const ocrText = file.ocrStatus && (!isApplied || file.ocrStatus.includes("OCR")) ? ` · OCR: ${file.ocrStatus}` : "";
+  const matchedText = buildMatchedText(file, matched, matchedDocIds);
+  const ocrText = file.ocrStatus ? ` · OCR: ${file.ocrStatus}` : "";
 
   return `
     <article class="file-card ${isApplied ? "file-card--applied" : ""}">
@@ -918,9 +971,10 @@ function renderFileCard(file) {
       </div>
       <div class="file-actions">
         ${suggestion && !isApplied ? `<button type="button" class="primary" data-apply-suggestion="${escapeAttr(file.id)}">추천 적용</button>` : ""}
-        ${canOcr && !isApplied ? `<button type="button" class="soft" data-run-ocr="${escapeAttr(file.id)}">OCR</button>` : ""}
+        ${canOcr ? `<button type="button" class="soft" data-run-ocr="${escapeAttr(file.id)}">OCR 재확인</button>` : ""}
         <button type="button" data-remove-upload="${escapeAttr(file.id)}">삭제</button>
       </div>
+      ${pageResultHtml}
       ${isApplied ? `
         <div class="auto-connect-note">체크리스트 반영 완료 · 잘못 연결되면 삭제 후 다시 넣거나 서류 카드에서 첨부를 해제하세요.</div>
       ` : `
@@ -936,19 +990,61 @@ function renderFileCard(file) {
   `;
 }
 
+function buildMatchedText(file, matched, matchedDocIds) {
+  if (matched) return `✓ ${TYPE_LABELS[matched.type]} · ${matched.doc.stage} · ${matched.doc.name}`;
+  if (matchedDocIds.length > 1) return `✓ ${TYPE_LABELS[file.activeTypeAtUpload] || TYPE_LABELS[state.activeType]} · ${matchedDocIds.length}개 서류 반영`;
+  return "";
+}
+
+function renderPageResults(results) {
+  if (!results.length) return "";
+  return `
+    <div class="page-ocr-results">
+      ${results.map((result) => {
+        const matched = result.docId ? getDocById(result.docId) : null;
+        const statusClass = result.status.includes("자동반영") ? "page-result--done" : (result.status.includes("추천") ? "page-result--pending" : "page-result--empty");
+        return `
+          <div class="page-result ${statusClass}">
+            <span class="page-result__page">${escapeHtml(result.pageLabel || `${result.page}쪽`)}</span>
+            <span class="page-result__title">${escapeHtml(result.title || "제목 확인 실패")}</span>
+            <span class="page-result__arrow">→</span>
+            <span class="page-result__doc">${matched ? escapeHtml(`${matched.doc.stage} · ${matched.doc.name}`) : escapeHtml(result.status)}</span>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
 function attachFileToDoc(docId, fileName, options = {}) {
   const docState = getDocState(docId);
-  if (!docState.files.includes(fileName)) docState.files.push(fileName);
+  const label = formatAttachmentLabel(fileName, options.pageLabel);
+  if (!docState.files.includes(label)) docState.files.push(label);
   docState.status = "첨부확인";
   if (!options.silent) toast("서류에 파일을 연결했어요.");
 }
 
-function attachIntegratedPledgeToDocs(fileName, type = state.activeType) {
+function formatAttachmentLabel(fileName, pageLabel = "") {
+  return pageLabel ? `${fileName} · ${pageLabel}` : fileName;
+}
+
+function getAttachmentBase(label = "") {
+  return String(label).replace(/ · (\d+쪽|이미지)$/g, "");
+}
+
+function cleanupGenericAttachmentForFile(fileName) {
+  Object.values(state.docs || {}).forEach((docState) => {
+    if (!docState?.files?.length) return;
+    docState.files = docState.files.filter((label) => label !== fileName);
+  });
+}
+
+function attachIntegratedPledgeToDocs(fileName, type = state.activeType, pageLabel = "") {
   const docIds = checklistData[type]
     .map((doc, index) => ({ doc, docId: getDocId(type, index) }))
     .filter(({ doc }) => INTEGRATED_PLEDGE_NAMES.has(doc.name))
     .map(({ docId }) => docId);
-  docIds.forEach((docId) => attachFileToDoc(docId, fileName, { silent: true }));
+  docIds.forEach((docId) => attachFileToDoc(docId, fileName, { pageLabel, silent: true }));
   return docIds;
 }
 
@@ -969,9 +1065,10 @@ function isIntegratedPledgeText(text = "") {
 
 function removeUpload(fileId) {
   const record = getFileRecord(fileId);
+  if (!record) return;
   getMatchedDocIds(record).forEach((docId) => {
     const docState = getDocState(docId);
-    docState.files = (docState.files || []).filter((name) => name !== record.name);
+    docState.files = (docState.files || []).filter((name) => getAttachmentBase(name) !== record.name);
     if (docState.status === "첨부확인" && docState.files.length === 0) docState.status = "미확인";
   });
   state.files = state.files.filter((item) => item.id !== fileId);
@@ -998,12 +1095,23 @@ function isOcrCandidate(file) {
   return file.type?.startsWith("image/") || ext === "pdf";
 }
 
-async function extractTitleText(file) {
+async function extractTitleTexts(file) {
   if (!window.Tesseract) throw new Error("Tesseract.js를 불러오지 못했습니다.");
-  const image = file.type?.startsWith("image/") ? await imageFileToDataUrl(file) : await firstPdfPageToCanvas(file);
-  const result = await window.Tesseract.recognize(image, "kor+eng", {
-    logger: () => {},
-  });
+  if (file.type?.startsWith("image/")) {
+    const image = await imageFileToDataUrl(file);
+    const text = await recognizeCanvasOrImage(image);
+    return [{ page: 1, pageLabel: "이미지", text }];
+  }
+  const ext = getExt(file.name);
+  if (ext !== "pdf") {
+    const text = await recognizeCanvasOrImage(await imageFileToDataUrl(file));
+    return [{ page: 1, pageLabel: "1쪽", text }];
+  }
+  return await extractPdfPageTitleTexts(file);
+}
+
+async function recognizeCanvasOrImage(image) {
+  const result = await window.Tesseract.recognize(image, "kor+eng", { logger: () => {} });
   return (result?.data?.text || "").trim();
 }
 
@@ -1016,18 +1124,46 @@ function imageFileToDataUrl(file) {
   });
 }
 
-async function firstPdfPageToCanvas(file) {
+async function extractPdfPageTitleTexts(file) {
   if (!window.pdfjsLib) throw new Error("PDF.js를 불러오지 못했습니다.");
   const data = await file.arrayBuffer();
   const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: 1.8 });
+  const pageCount = Math.min(pdf.numPages || 1, 12);
+  const results = [];
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    const canvas = await pdfPageTopToCanvas(pdf, pageNumber);
+    const text = await recognizeCanvasOrImage(canvas);
+    results.push({ page: pageNumber, pageLabel: `${pageNumber}쪽`, text });
+  }
+  return results;
+}
+
+async function pdfPageTopToCanvas(pdf, pageNumber) {
+  const page = await pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: 1.7 });
+  const fullCanvas = document.createElement("canvas");
+  const fullContext = fullCanvas.getContext("2d", { willReadFrequently: true });
+  fullCanvas.width = viewport.width;
+  fullCanvas.height = viewport.height;
+  await page.render({ canvasContext: fullContext, viewport }).promise;
+
+  const cropHeight = Math.max(Math.floor(fullCanvas.height * 0.38), Math.min(fullCanvas.height, 360));
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  await page.render({ canvasContext: context, viewport }).promise;
+  canvas.width = fullCanvas.width;
+  canvas.height = cropHeight;
+  context.drawImage(fullCanvas, 0, 0, fullCanvas.width, cropHeight, 0, 0, fullCanvas.width, cropHeight);
   return canvas;
+}
+
+function extractLikelyTitle(text = "") {
+  const lines = String(text)
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line) => line.length >= 2)
+    .filter((line) => !/^[\[\]✔✓∨\s0-9.,:;()/-]+$/.test(line));
+  const strong = lines.find((line) => /(체크리스트|공정표|착공계|준공계|서약서|확인서|증명서|내역서|청구서|계산서|신고서|보증서|각서|사진|필증)/.test(line));
+  return (strong || lines[0] || "").slice(0, 80);
 }
 
 function findBestMatch(text, type) {
@@ -1232,6 +1368,7 @@ function importJson(event) {
         docs: parsed.docs || {},
         files: parsed.files || [],
         collapsed: parsed.collapsed || {},
+        expandedDocs: parsed.expandedDocs || {},
       };
       persistState();
       hydrateInfoForm();
@@ -1246,15 +1383,38 @@ function importJson(event) {
   reader.readAsText(file, "utf-8");
 }
 
-function resetAll() {
-  const ok = window.confirm("현재 입력값, 체크상태, 첨부 연결 기록을 모두 초기화할까요?");
+function resetDocsOnly() {
+  const ok = window.confirm("서류 체크상태와 첨부파일 연결만 초기화할까요?\n계약명, 업체명, 계약금액 등 계약 기본정보는 유지됩니다.");
   if (!ok) return;
-  state = { activeType: state.activeType, info: {}, docs: {}, files: [], collapsed: {} };
+  state.docs = {};
+  state.files = [];
+  state.expandedDocs = {};
+  transientFiles.clear();
+  persistState();
+  hydrateInfoForm();
+  renderAll();
+  toast("서류 상태와 첨부 연결만 초기화했어요.");
+}
+
+function resetInfoOnly() {
+  const ok = window.confirm("계약 기본정보만 초기화할까요?\n서류 체크상태와 첨부 연결은 유지됩니다.");
+  if (!ok) return;
+  state.info = { stageFilter: "전체" };
+  persistState();
+  hydrateInfoForm();
+  renderAll();
+  toast("계약 기본정보만 초기화했어요.");
+}
+
+function resetAll() {
+  const ok = window.confirm("계약 기본정보, 체크상태, 첨부 연결 기록을 모두 초기화할까요?");
+  if (!ok) return;
+  state = { activeType: state.activeType, info: {}, docs: {}, files: [], collapsed: {}, expandedDocs: {} };
   transientFiles.clear();
   localStorage.removeItem(APP_KEY);
   hydrateInfoForm();
   renderAll();
-  toast("초기화했어요.");
+  toast("전체 초기화했어요.");
 }
 
 function toggleExpandAll() {

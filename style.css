@@ -732,3 +732,92 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
   .doc-inline-actions { gap: 5px; }
   .quick-status { padding: 6px 9px; font-size: 11.5px; }
 }
+
+/* v0.1.6: 맨위로, 초기화 분리, 페이지별 OCR 결과 */
+.stage-roadmap__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.stage-roadmap__tools .ghost-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 999px;
+}
+.stage-roadmap__tools .top-button {
+  background: var(--navy);
+  border-color: var(--navy);
+  color: #fff;
+}
+.utility-buttons #resetDocsBtn {
+  background: #fff;
+  color: var(--navy);
+  border-color: #cfe0f4;
+}
+.utility-buttons #resetInfoBtn {
+  background: #fff;
+  color: #46566e;
+  border-color: #d7dee9;
+}
+.page-ocr-results {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.68);
+  border: 1px solid rgba(207, 224, 244, 0.82);
+  padding: 8px;
+}
+.page-result {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 0.8fr) auto minmax(180px, 1.2fr);
+  gap: 7px;
+  align-items: center;
+  border-radius: 10px;
+  padding: 7px 8px;
+  font-size: 12px;
+  color: #44546a;
+  background: #fff;
+}
+.page-result--done {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+.page-result--pending {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.page-result--empty {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.page-result__page {
+  font-weight: 900;
+  color: var(--navy);
+  white-space: nowrap;
+}
+.page-result__title {
+  font-weight: 850;
+  color: #172033;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.page-result__arrow {
+  color: var(--muted-2);
+  font-weight: 900;
+}
+.page-result__doc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 680px) {
+  .stage-roadmap__tools { justify-content: flex-start; }
+  .page-result {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .page-result__arrow { display: none; }
+  .page-result__doc { grid-column: 2 / 3; white-space: normal; }
+}

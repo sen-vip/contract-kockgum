@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>계약콕검 v0.1.5</title>
+  <title>계약콕검 v0.1.6</title>
   <meta name="description" content="공사·용역·물품 계약서류 확인도구" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <div class="page-shell">
-    <header class="hero no-print">
+    <header class="hero no-print" id="appTop">
       <div class="hero__text">
         <p class="eyebrow">학돌랩 콕검 시리즈</p>
         <h1>계약콕검</h1>
@@ -125,7 +125,7 @@
             <button type="button" id="chooseFileBtn">파일 선택</button>
           </div>
         </div>
-        <p class="helper-text">파일명을 읽어 맞는 서류는 바로 체크리스트에 첨부확인으로 표시합니다. 스캔파일은 제목만 확인하며 최종 판단은 담당자가 직접 확인하세요.</p>
+        <p class="helper-text">파일명을 읽어 맞는 서류는 바로 체크리스트에 첨부확인으로 표시합니다. 보완서류처럼 여러 장이 합쳐진 PDF는 페이지별 제목 OCR로 확인합니다. 최종 판단은 담당자가 직접 확인하세요.</p>
         <div class="file-list" id="fileList"></div>
       </section>
 
@@ -139,7 +139,9 @@
             <button type="button" id="exportJsonBtn">JSON 저장</button>
             <label class="import-label" for="importJsonInput">JSON 불러오기</label>
             <input id="importJsonInput" type="file" accept="application/json,.json" hidden />
-            <button type="button" id="resetBtn" class="danger-button">전체 초기화</button>
+            <button type="button" id="resetDocsBtn">서류만 초기화</button>
+            <button type="button" id="resetInfoBtn">계약정보 초기화</button>
+            <button type="button" id="resetAllBtn" class="danger-button">전체 초기화</button>
           </div>
         </div>
         <div class="notice-box">
