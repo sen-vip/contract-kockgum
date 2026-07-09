@@ -156,9 +156,10 @@ const manualAliases = {
   "적격심사 서류(입찰시)": ["적격심사"],
   "계약보증금(보증서, 지급확약서)": ["계약보증서", "계약보증금", "지급확약서", "계약보증금지급확약서"],
   "계약보증금(보증서, 지급 확약서)": ["계약보증서", "계약보증금", "지급확약서", "계약보증금지급확약서"],
-  "공사 면허 등록증, 등록수첩": ["건설업등록증", "면허등록증", "등록수첩", "공사업등록증"],
-  "사업자등록증 사본": ["사업자등록증"],
-  "등기사항전부증명서(법인등기부등본)": ["등기사항전부증명서", "법인등기부등본", "등기부등본"],
+  "공사 면허 등록증, 등록수첩": ["전문건설업등록증", "건설업등록증", "건설업등록수첩", "전문공사업등록증", "공사업등록증", "면허등록증", "면허수첩", "등록수첩", "건설업면허"],
+  "사업자등록증 사본": ["사업자등록증", "법인사업자", "개인사업자", "사업자등록", "등록번호"],
+  "등기사항전부증명서(법인등기부등본)": ["등기사항전부증명서", "법인등기부등본", "등기부등본", "현재유효사항", "제출용", "등기사항"],
+  "사용인감계": ["사용인감계", "사용 인감계", "사용인감", "인감증명서", "법인인감증명서", "개인인감증명서"],
   "수의계약 체결제한 여부 확인서": ["수의계약체결제한여부확인서", "체결제한여부확인서", "이해충돌방지법", "수의계약통합서약서", "통합서약서"],
   "수의계약 각서": ["수의계약각서", "수의계약통합서약서", "통합서약서"],
   "조세포탈 서약서": ["조세포탈", "조세포탈여부확인서약서", "제31조의5", "서약서", "수의계약통합서약서", "통합서약서"],
@@ -190,7 +191,7 @@ const manualAliases = {
   "소기업, 소상공인 확인서 / 중기업 확인서": ["소기업확인서", "소상공인확인서", "중기업확인서", "중소기업확인서"],
   "직접생산증명서": ["직접생산", "직생"],
   "자격(인가,허가,면허)등, 등록(신고)필증": ["자격", "인가", "허가", "면허", "등록필증", "신고필증"],
-  "청렴서약서": ["청렴계약이행서약서", "청렴이행서약서", "청렴계약", "수의계약통합서약서", "통합서약서"],
+  "청렴서약서": ["청렴계약이행서약서", "청렴이행서약서", "청렴계약", "청렴계약이행", "수의계약통합서약서", "통합서약서"],
   "근로조건이행 확약서": ["근로조건이행", "근로자권리보호"],
   "보안각서": ["보안각서"],
   "보안 각서": ["보안각서"],
@@ -207,6 +208,15 @@ const manualAliases = {
   "완료검사조서": ["완료검사조서", "검사조서"],
   "기타 개별법령에 의한 서류": ["개별법령", "급식식재료"],
 };
+
+const priorityMatchers = [
+  { docName: "공사 면허 등록증, 등록수첩", terms: ["전문건설업등록증", "건설업등록증", "건설업등록수첩", "전문공사업등록증", "공사업등록증", "건설업면허", "면허등록증"] },
+  { docName: "사업자등록증 사본", terms: ["사업자등록증", "법인사업자", "개인사업자", "사업자등록번호"] },
+  { docName: "등기사항전부증명서(법인등기부등본)", terms: ["등기사항전부증명서", "법인등기부등본", "현재유효사항", "등기사항"] },
+  { docName: "사용인감계", terms: ["사용인감계", "사용인감", "인감증명서", "법인인감증명서", "개인인감증명서"] },
+  { docName: "공사공정예정표", terms: ["예정공정표", "공정예정표", "공사예정공정표"] },
+  { docName: "공사(용역)안전·보건 체크리스트", terms: ["일반산업재해예방체크리스트", "산업재해예방체크리스트", "산업재해체크리스트", "안전보건체크리스트"] },
+];
 
 let state = loadState();
 let transientFiles = new Map();
@@ -374,6 +384,13 @@ function bindEvents() {
   $("#resetInfoBtn").addEventListener("click", resetInfoOnly);
   $("#resetAllBtn").addEventListener("click", resetAll);
   $("#expandAllBtn").addEventListener("click", toggleExpandAll);
+  const floatingTopBtn = $("#floatingTopBtn");
+  if (floatingTopBtn) {
+    floatingTopBtn.addEventListener("click", scrollToPageTop);
+    window.addEventListener("scroll", () => {
+      floatingTopBtn.classList.toggle("show", window.scrollY > 420);
+    }, { passive: true });
+  }
 }
 
 function hydrateInfoForm() {
@@ -822,11 +839,14 @@ async function autoOcrUnmatched(files) {
         }
 
         const match = findBestMatch(pageText, state.activeType);
+        if (match?.sourceTerm && (!pageResult.title || /별지|서식|제출용|제목 확인 실패/.test(pageResult.title))) {
+          pageResult.title = match.sourceTerm;
+        }
         if (match && match.score >= 65) {
           cleanupGenericAttachmentForFile(record.name);
           attachFileToDoc(match.docId, record.name, { pageLabel: page.pageLabel, silent: true });
           autoDocIds.add(match.docId);
-          pageResult.status = "페이지 OCR 자동반영";
+          pageResult.status = match.sourceTerm && normalizeText(match.sourceTerm).includes("인감증명서") ? "사용인감계 관련 첨부 자동반영" : "페이지 OCR 자동반영";
           pageResult.docId = match.docId;
           pageResult.score = match.score;
           autoCount += 1;
@@ -1147,7 +1167,9 @@ async function pdfPageTopToCanvas(pdf, pageNumber) {
   fullCanvas.height = viewport.height;
   await page.render({ canvasContext: fullContext, viewport }).promise;
 
-  const cropHeight = Math.max(Math.floor(fullCanvas.height * 0.38), Math.min(fullCanvas.height, 360));
+  // 실무 보완서류는 제목이 페이지 맨 위가 아니라 상단~중단에 걸쳐 있는 경우가 많다.
+  // 예: 전문건설업등록증, 사업자등록증, 인감증명서처럼 여백 아래에 큰 제목이 배치됨.
+  const cropHeight = Math.max(Math.floor(fullCanvas.height * 0.64), Math.min(fullCanvas.height, 720));
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d", { willReadFrequently: true });
   canvas.width = fullCanvas.width;
@@ -1166,9 +1188,30 @@ function extractLikelyTitle(text = "") {
   return (strong || lines[0] || "").slice(0, 80);
 }
 
+function findDocIdByName(type, docName) {
+  const index = checklistData[type]?.findIndex((doc) => doc.name === docName);
+  return index >= 0 ? getDocId(type, index) : "";
+}
+
+function findPriorityMatch(normalized, type) {
+  for (const matcher of priorityMatchers) {
+    const docId = findDocIdByName(type, matcher.docName);
+    if (!docId) continue;
+    for (const term of matcher.terms) {
+      const normTerm = normalizeText(term);
+      if (normTerm && normalized.includes(normTerm)) {
+        return { docId, score: 98, doc: getDocById(docId)?.doc, sourceTerm: term, priority: true };
+      }
+    }
+  }
+  return null;
+}
+
 function findBestMatch(text, type) {
   const normalized = normalizeText(text);
   if (!normalized) return null;
+  const priority = findPriorityMatch(normalized, type);
+  if (priority) return priority;
   let best = null;
 
   checklistData[type].forEach((doc, index) => {
@@ -1176,11 +1219,19 @@ function findBestMatch(text, type) {
     const terms = buildTerms(doc.name);
     let score = 0;
 
+    let sourceTerm = "";
     terms.forEach((term) => {
       const normTerm = normalizeText(term);
       if (!normTerm || normTerm.length < 2) return;
-      if (normalized.includes(normTerm)) score = Math.max(score, normTerm.length > 8 ? 92 : 74);
-      if (normTerm.includes(normalized) && normalized.length > 4) score = Math.max(score, 55);
+      if (normalized.includes(normTerm)) {
+        const nextScore = normTerm.length > 8 ? 92 : 74;
+        if (nextScore > score) sourceTerm = term;
+        score = Math.max(score, nextScore);
+      }
+      if (normTerm.includes(normalized) && normalized.length > 4) {
+        if (55 > score) sourceTerm = term;
+        score = Math.max(score, 55);
+      }
     });
 
     const tokens = buildTokens(doc.name);
@@ -1194,7 +1245,7 @@ function findBestMatch(text, type) {
     const cautionPenalty = applyOverMatchPenalty(doc.name, normalized);
     score = Math.max(0, score - cautionPenalty);
 
-    if (!best || score > best.score) best = { docId, score, doc };
+    if (!best || score > best.score) best = { docId, score, doc, sourceTerm };
   });
 
   return best?.score > 0 ? best : null;

@@ -821,3 +821,78 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
   .page-result__arrow { display: none; }
   .page-result__doc { grid-column: 2 / 3; white-space: normal; }
 }
+
+
+/* v0.1.7 데이터 관리/맨위로 개선 */
+.management-panel {
+  grid-column: 1 / 2;
+  padding: 18px 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98));
+}
+.management-title { margin-bottom: 12px; }
+.management-help {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.management-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.management-button {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--ink);
+  padding: 13px 14px;
+  text-align: left;
+  min-height: 72px;
+  display: grid;
+  gap: 4px;
+  transition: transform .15s ease, border-color .15s ease, background .15s ease;
+}
+.management-button:hover { transform: translateY(-1px); border-color: #b8c7da; }
+.management-button strong { font-size: 14px; font-weight: 900; }
+.management-button span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.management-button.docs-reset { background: var(--blue-bg); border-color: var(--blue-line); }
+.management-button.info-reset { background: var(--purple-bg); border-color: #ddd6fe; }
+.management-button.all-reset { background: var(--red-bg); border-color: #ffd8d8; }
+.management-button.all-reset strong { color: var(--red); }
+
+.floating-top-button {
+  position: fixed;
+  right: 22px;
+  bottom: 24px;
+  z-index: 60;
+  border: 1px solid rgba(31, 58, 95, 0.16);
+  background: var(--navy);
+  color: #fff;
+  border-radius: 999px;
+  width: 58px;
+  height: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  flex-direction: column;
+  box-shadow: 0 14px 34px rgba(20, 30, 50, 0.22);
+  opacity: 0;
+  transform: translateY(14px) scale(.96);
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+  font-size: 20px;
+  font-weight: 900;
+}
+.floating-top-button span {
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+.floating-top-button.show { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+
+@media (max-width: 820px) {
+  .management-actions { grid-template-columns: 1fr; }
+  .floating-top-button { right: 14px; bottom: 16px; width: 54px; height: 54px; }
+}
