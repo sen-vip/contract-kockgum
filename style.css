@@ -896,3 +896,75 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
   .management-actions { grid-template-columns: 1fr; }
   .floating-top-button { right: 14px; bottom: 16px; width: 54px; height: 54px; }
 }
+
+
+/* v0.1.8 OCR 진행상태/확인필요 개선 */
+.file-card--processing {
+  border-color: #f6c76b;
+  background: #fffbeb;
+}
+.ocr-processing-text::after {
+  content: ".";
+  display: inline-block;
+  width: 18px;
+  text-align: left;
+  animation: ocrDots 1.05s steps(3, end) infinite;
+}
+@keyframes ocrDots {
+  0% { content: "."; }
+  33% { content: ".."; }
+  66%, 100% { content: "..."; }
+}
+.ocr-progress-box {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #f6d28b;
+  background: rgba(255, 251, 235, 0.86);
+  border-radius: 12px;
+  padding: 9px 10px;
+}
+.ocr-progress-box__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: #7c4a03;
+}
+.ocr-progress-box__head span,
+.ocr-progress-box__head strong {
+  font-weight: 900;
+}
+.ocr-progress-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #fdecc8;
+}
+.ocr-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #d97706;
+  transition: width .18s ease;
+}
+.ocr-progress-box p {
+  margin: 0;
+  color: #8a5a16;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.file-card--processing .status-pill {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+.page-result--pending .page-result__doc::before {
+  content: "확인필요 · ";
+  color: #b45309;
+  font-weight: 900;
+}
+@media (max-width: 640px) {
+  .ocr-progress-box__head { align-items: flex-start; flex-direction: column; }
+}
