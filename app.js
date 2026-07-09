@@ -154,8 +154,8 @@ const manualAliases = {
   "계약 특수조건": ["특수조건"],
   "적격심사 서류": ["적격심사"],
   "적격심사 서류(입찰시)": ["적격심사"],
-  "계약보증금(보증서, 지급확약서)": ["계약보증서", "계약보증금", "지급확약서", "계약보증금지급확약서"],
-  "계약보증금(보증서, 지급 확약서)": ["계약보증서", "계약보증금", "지급확약서", "계약보증금지급확약서"],
+  "계약보증금(보증서, 지급확약서)": ["계약보증서", "계약보증금", "지급확약서", "지급 확약서", "지급각서", "지급 각서", "계약보증금지급확약서", "계약보증금지급각서", "계약보증금 지급각서", "계약보증금 지급 확약서", "계약보증금 납부확약서", "계약이행보증금 지급각서"],
+  "계약보증금(보증서, 지급 확약서)": ["계약보증서", "계약보증금", "지급확약서", "지급 확약서", "지급각서", "지급 각서", "계약보증금지급확약서", "계약보증금지급각서", "계약보증금 지급각서", "계약보증금 지급 확약서", "계약보증금 납부확약서", "계약이행보증금 지급각서"],
   "공사 면허 등록증, 등록수첩": ["전문건설업등록증", "건설업등록증", "건설업등록수첩", "전문공사업등록증", "공사업등록증", "면허등록증", "면허수첩", "등록수첩", "건설업면허"],
   "사업자등록증 사본": ["사업자등록증", "사업자 등록증", "사업자등록증명"],
   "등기사항전부증명서(법인등기부등본)": ["등기사항전부증명서", "법인등기부등본", "등기부등본", "현재유효사항", "제출용", "등기사항"],
@@ -210,6 +210,8 @@ const manualAliases = {
 };
 
 const priorityMatchers = [
+  { docName: "계약보증금(보증서, 지급확약서)", terms: ["계약보증금 지급각서", "계약보증금지급각서", "계약보증금 지급확약서", "계약보증금지급확약서", "계약보증금 납부확약서", "계약이행보증금 지급각서", "지급각서", "지급확약서"] },
+  { docName: "계약보증금(보증서, 지급 확약서)", terms: ["계약보증금 지급각서", "계약보증금지급각서", "계약보증금 지급확약서", "계약보증금지급확약서", "계약보증금 납부확약서", "계약이행보증금 지급각서", "지급각서", "지급확약서"] },
   { docName: "청렴서약서", terms: ["청렴계약이행서약서", "청렴계약 이행 서약서", "청렴이행서약서", "청렴서약서", "청렴계약이행", "청렴계약"] },
   { docName: "수의계약 체결제한 여부 확인서", terms: ["수의계약체결제한여부확인서", "수의계약 체결 제한 여부 확인서", "수의계약체결 제한여부확인서", "체결제한여부확인서", "공직자의이해충돌방지법"] },
   { docName: "수의계약 각서", terms: ["수의계약각서", "수의계약 각서", "수의계약배제사유"] },
@@ -1204,6 +1206,7 @@ function buildMatchedText(file, matched, matchedDocIds) {
 function getMatchReason(match) {
   if (!match) return "";
   if (match.caution) return "단서매칭 · 확인필요";
+  if (match.sourceTerm && normalizeText(match.sourceTerm).includes("계약보증금")) return "계약보증금 직접매칭";
   if (match.priority || match.score >= 95) return "제목 직접매칭";
   return "제목 OCR 매칭";
 }
@@ -1519,6 +1522,11 @@ function hasLooseTitle(rawText, title) {
 }
 
 function findHeuristicMatch(rawText, normalized, type) {
+  // 계약보증금 지급각서는 청렴서약서/수의계약 각서보다 먼저 확정한다.
+  if (hasAnyLooseTitle(rawText, ["계약보증금 지급각서", "계약보증금 지급 확약서", "계약보증금 지급확약서", "계약보증금 납부확약서", "계약이행보증금 지급각서"]) || /계약보증금지급각서|계약보증금지급확약서|계약보증금납부확약서|계약이행보증금지급각서/.test(normalized) || (normalized.includes("계약보증금") && /지급각서|지급확약서|납부확약서/.test(normalized))) {
+    return makeHeuristicMatch(type, "계약보증금(보증서, 지급확약서)", 99, "계약보증금 지급각서", false);
+  }
+
   // 강한 제목이 보이면 본문 단서보다 먼저 확정한다.
   if (hasAnyLooseTitle(rawText, ["청렴계약이행서약서", "청렴계약 이행 서약서", "청렴이행서약서", "청렴서약서"]) || /청렴계약이행서약서|청렴이행서약서|청렴서약서|청렴계약이행/.test(normalized)) {
     return makeHeuristicMatch(type, "청렴서약서", 98, "청렴계약이행서약서", false);
@@ -1591,6 +1599,10 @@ function isCautionPriorityMatch(docName, normTerm, normalized) {
   // 단독 보조 단어로는 자동분류하지 않는다.
   const weakTerms = ["등록번호", "사업자등록번호", "증명서", "제출용", "법인", "현재유효사항"];
   if (weakTerms.includes(normTerm)) return true;
+  const looksLikeContractGuarantee = normalized.includes("계약보증금") && /지급각서|지급확약서|납부확약서/.test(normalized);
+  if (docName === "청렴서약서" && looksLikeContractGuarantee) return true;
+  if (docName === "수의계약 각서" && looksLikeContractGuarantee) return true;
+  if ((docName === "계약보증금(보증서, 지급확약서)" || docName === "계약보증금(보증서, 지급 확약서)") && (normTerm === "지급각서" || normTerm === "지급확약서") && !normalized.includes("계약보증금")) return true;
   if (docName === "사업자등록증 사본") {
     const hasDirectTitle = normalized.includes("사업자등록증") || normalized.includes("사업자등록증명");
     if (!hasDirectTitle) return true;
@@ -1692,6 +1704,8 @@ function isGenericOrUnsafeMatch(name, sourceTerm, normalizedText) {
 
 function applyOverMatchPenalty(name, normalizedText) {
   const normName = normalizeText(name);
+  const looksLikeContractGuarantee = normalizedText.includes("계약보증금") && /지급각서|지급확약서|납부확약서/.test(normalizedText);
+  if ((normName === "청렴서약서" || normName === "수의계약각서" || normName === "조세포탈서약서") && looksLikeContractGuarantee) return 120;
   if (normName === "사업자등록증사본" && /청렴|수의계약|체결제한|조세포탈|서약서|확인서/.test(normalizedText) && !/사업자등록증|사업자등록증명/.test(normalizedText)) return 92;
   if (normName === "사용인감계" && hasStrongSealExclusion(normalizedText)) return 92;
   if (normName === "계약서" && /청렴서약서|조세포탈서약서|계약보증|수의계약/.test(normalizedText)) return 50;
