@@ -1027,3 +1027,35 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
     margin-top: 4px;
   }
 }
+
+
+/* v0.1.11 OCR 결과 서류명 가독성 개선 */
+.page-result {
+  grid-template-columns: minmax(48px, 68px) minmax(110px, 1fr) 16px minmax(220px, 1.8fr) auto auto;
+}
+.page-result__doc {
+  font-weight: 850;
+  color: #1f3a5f;
+}
+.page-result:hover .page-result__title,
+.page-result:hover .page-result__doc,
+.page-result:focus-within .page-result__title,
+.page-result:focus-within .page-result__doc {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.page-result:hover {
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 8px 22px rgba(30, 58, 95, 0.10);
+}
+@media (max-width: 640px) {
+  .page-result {
+    grid-template-columns: 54px 1fr;
+  }
+  .page-result__doc {
+    grid-column: 2 / 3;
+    white-space: normal;
+  }
+}

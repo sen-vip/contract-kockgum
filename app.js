@@ -1188,7 +1188,7 @@ function renderFileCard(file) {
 }
 
 function buildMatchedText(file, matched, matchedDocIds) {
-  if (matched) return `✓ ${TYPE_LABELS[matched.type]} · ${matched.doc.stage} · ${matched.doc.name}`;
+  if (matched) return `✓ ${TYPE_LABELS[matched.type]} · ${matched.doc.name}`;
   if (matchedDocIds.length > 1) return `✓ ${TYPE_LABELS[file.activeTypeAtUpload] || TYPE_LABELS[state.activeType]} · ${matchedDocIds.length}개 서류 반영`;
   return "";
 }
@@ -1209,12 +1209,17 @@ function renderPageResults(results, file = null) {
         const precisionButton = canPrecision ? `
           <button type="button" class="page-result__precision" data-run-page-ocr="${escapeAttr(file.id)}" data-page-number="${escapeAttr(result.page || index + 1)}" data-page-index="${index}">정밀 OCR</button>
         ` : "";
+        const titleText = result.title || "제목 확인 실패";
+        const docText = matched ? matched.doc.name : result.status;
+        const fullTooltip = matched
+          ? `${result.pageLabel || `${result.page}쪽`} · ${titleText} → ${matched.doc.name}`
+          : `${result.pageLabel || `${result.page}쪽`} · ${titleText} → ${docText}`;
         return `
-          <div class="page-result ${statusClass}">
+          <div class="page-result ${statusClass}" title="${escapeAttr(fullTooltip)}">
             <span class="page-result__page">${escapeHtml(result.pageLabel || `${result.page}쪽`)}</span>
-            <span class="page-result__title">${escapeHtml(result.title || "제목 확인 실패")}</span>
+            <span class="page-result__title" title="${escapeAttr(titleText)}">${escapeHtml(titleText)}</span>
             <span class="page-result__arrow">→</span>
-            <span class="page-result__doc">${matched ? escapeHtml(`${matched.doc.stage} · ${matched.doc.name}`) : escapeHtml(result.status)}</span>
+            <span class="page-result__doc" title="${escapeAttr(docText)}">${escapeHtml(docText)}</span>
             ${applyButton}
             ${precisionButton}
           </div>
