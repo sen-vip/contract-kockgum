@@ -851,7 +851,7 @@ async function autoOcrUnmatched(files) {
         }
 
         const match = findBestMatch(pageText, state.activeType);
-        if (match?.sourceTerm && (!pageResult.title || /별지|서식|제출용|제목 확인 실패|등록번호/.test(pageResult.title))) {
+        if (match?.sourceTerm && (!pageResult.title || /별지|서식|제출용|제목 확인 실패|등록번호|상단|본문단서|법인|대표자|사업자번호/.test(pageResult.title))) {
           pageResult.title = match.sourceTerm;
         }
         const needsHumanCheck = match && (match.score < 82 || match.caution);
@@ -942,6 +942,29 @@ function renderFiles() {
     });
   });
 
+  $$("[data-apply-page-doc]", list).forEach((button) => {
+    button.addEventListener("click", () => {
+      const file = getFileRecord(button.dataset.applyPageDoc);
+      const docId = button.dataset.pageDocId;
+      const pageIndex = Number(button.dataset.pageIndex || -1);
+      if (!file || !docId) return;
+      const pageResult = file.pageResults?.[pageIndex];
+      if (!file.matchedDocIds) file.matchedDocIds = [];
+      if (!file.matchedDocIds.includes(docId)) file.matchedDocIds.push(docId);
+      file.matchedDocId = file.matchedDocIds[0] || docId;
+      file.applied = true;
+      file.status = "확인필요 적용";
+      if (pageResult) {
+        pageResult.status = "확인 적용";
+        pageResult.applied = true;
+      }
+      attachFileToDoc(docId, file.name, { pageLabel: pageResult?.pageLabel || button.dataset.pageLabel || "", silent: true });
+      persistState();
+      renderAll();
+      toast("확인필요 항목을 체크리스트에 반영했어요.");
+    });
+  });
+
   $$("[data-run-ocr]", list).forEach((button) => {
     button.addEventListener("click", async () => {
       const fileId = button.dataset.runOcr;
@@ -1018,7 +1041,7 @@ function renderFileCard(file) {
     const docId = getDocId(state.activeType, index);
     return `<option value="${escapeAttr(docId)}">${escapeHtml(`${doc.stage} · ${doc.name}`)}</option>`;
   }).join("");
-  const pageResultHtml = renderPageResults(file.pageResults || []);
+  const pageResultHtml = renderPageResults(file.pageResults || [], file);
   const appliedLabel = matchedDocIds.length > 1 ? `자동반영 ${matchedDocIds.length}건` : "자동반영";
   const matchedText = buildMatchedText(file, matched, matchedDocIds);
   const ocrText = file.ocrStatus ? ` · OCR: ${file.ocrStatus}` : "";
@@ -1065,19 +1088,25 @@ function buildMatchedText(file, matched, matchedDocIds) {
   return "";
 }
 
-function renderPageResults(results) {
+function renderPageResults(results, file = null) {
   if (!results.length) return "";
   return `
     <div class="page-ocr-results">
-      ${results.map((result) => {
+      ${results.map((result, index) => {
         const matched = result.docId ? getDocById(result.docId) : null;
-        const statusClass = result.status.includes("자동반영") ? "page-result--done" : ((result.status.includes("추천") || result.status.includes("확인필요")) ? "page-result--pending" : "page-result--empty");
+        const isDone = result.status.includes("자동반영") || result.status.includes("확인 적용") || result.applied;
+        const isPending = result.status.includes("추천") || result.status.includes("확인필요");
+        const statusClass = isDone ? "page-result--done" : (isPending ? "page-result--pending" : "page-result--empty");
+        const applyButton = file && isPending && result.docId ? `
+          <button type="button" class="page-result__apply" data-apply-page-doc="${escapeAttr(file.id)}" data-page-doc-id="${escapeAttr(result.docId)}" data-page-index="${index}" data-page-label="${escapeAttr(result.pageLabel || `${result.page}쪽`)}">반영</button>
+        ` : "";
         return `
           <div class="page-result ${statusClass}">
             <span class="page-result__page">${escapeHtml(result.pageLabel || `${result.page}쪽`)}</span>
             <span class="page-result__title">${escapeHtml(result.title || "제목 확인 실패")}</span>
             <span class="page-result__arrow">→</span>
             <span class="page-result__doc">${matched ? escapeHtml(`${matched.doc.stage} · ${matched.doc.name}`) : escapeHtml(result.status)}</span>
+            ${applyButton}
           </div>
         `;
       }).join("")}
@@ -1236,17 +1265,20 @@ function mergeOcrTexts(parts = []) {
 
 async function pdfPageTitleCanvases(pdf, pageNumber) {
   const page = await pdf.getPage(pageNumber);
-  const viewport = page.getViewport({ scale: 2.25 });
+  const viewport = page.getViewport({ scale: 2.55 });
   const fullCanvas = document.createElement("canvas");
   const fullContext = fullCanvas.getContext("2d", { willReadFrequently: true });
   fullCanvas.width = viewport.width;
   fullCanvas.height = viewport.height;
   await page.render({ canvasContext: fullContext, viewport }).promise;
 
-  // 실무 보완서류는 제목 위치가 다르다. 한 번만 읽지 않고 상단 넓은 영역 + 제목 중앙 밴드를 함께 확인한다.
+  // v0.1.9: 스캔 보완서류는 제목 위치가 제각각이다.
+  // 상단 제목, 중앙 큰 제목, 본문 단서 영역을 나누어 읽고, 매칭 단계에서 안전하게 확인필요로 넘긴다.
   const zones = [
-    { label: "상단", y: 0, h: 0.66 },
-    { label: "제목영역", y: 0.12, h: 0.34 },
+    { label: "상단", y: 0, h: 0.38 },
+    { label: "제목영역", y: 0.10, h: 0.42 },
+    { label: "중앙영역", y: 0.20, h: 0.46 },
+    { label: "본문단서", y: 0.34, h: 0.56 },
   ];
   return zones.map((zone) => ({ label: zone.label, canvas: cropAndPrepareCanvas(fullCanvas, zone.y, zone.h) }));
 }
@@ -1254,11 +1286,15 @@ async function pdfPageTitleCanvases(pdf, pageNumber) {
 function cropAndPrepareCanvas(fullCanvas, yRatio, hRatio) {
   const sourceY = Math.max(0, Math.floor(fullCanvas.height * yRatio));
   const sourceH = Math.min(fullCanvas.height - sourceY, Math.floor(fullCanvas.height * hRatio));
+  const scale = 1.45;
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  canvas.width = fullCanvas.width;
-  canvas.height = sourceH;
-  context.drawImage(fullCanvas, 0, sourceY, fullCanvas.width, sourceH, 0, 0, fullCanvas.width, sourceH);
+  canvas.width = Math.floor(fullCanvas.width * scale);
+  canvas.height = Math.floor(sourceH * scale);
+  context.imageSmoothingEnabled = false;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(fullCanvas, 0, sourceY, fullCanvas.width, sourceH, 0, 0, canvas.width, canvas.height);
   return enhanceCanvasForOcr(canvas);
 }
 
@@ -1268,7 +1304,11 @@ function enhanceCanvasForOcr(canvas) {
   const data = image.data;
   for (let i = 0; i < data.length; i += 4) {
     const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    const boosted = gray < 176 ? Math.max(0, gray - 34) : Math.min(255, gray + 26);
+    // 회색 배경은 날리고, 흐린 검정 글자는 조금 더 진하게 만든다. 완전 이진화는 도장/선 때문에 오히려 깨질 수 있어 완만하게 보정한다.
+    let boosted = (gray - 128) * 1.72 + 128;
+    if (gray > 218) boosted = 255;
+    if (gray < 150) boosted = Math.max(0, boosted - 24);
+    boosted = Math.max(0, Math.min(255, boosted));
     data[i] = data[i + 1] = data[i + 2] = boosted;
   }
   context.putImageData(image, 0, 0);
@@ -1288,6 +1328,74 @@ function extractLikelyTitle(text = "") {
 function findDocIdByName(type, docName) {
   const index = checklistData[type]?.findIndex((doc) => doc.name === docName);
   return index >= 0 ? getDocId(type, index) : "";
+}
+
+function compactHangul(text = "") {
+  return String(text).normalize("NFKC").replace(/[^가-힣a-zA-Z0-9]/g, "").toLowerCase();
+}
+
+function countClues(normalized, clues = []) {
+  return clues.filter((clue) => normalized.includes(normalizeText(clue))).length;
+}
+
+function makeHeuristicMatch(type, docName, score, sourceTerm, caution = true) {
+  const docId = findDocIdByName(type, docName);
+  if (!docId) return null;
+  return { docId, score, doc: getDocById(docId)?.doc, sourceTerm, priority: true, caution };
+}
+
+function hasLooseTitle(rawText, title) {
+  const raw = compactHangul(rawText);
+  const target = compactHangul(title);
+  if (!raw || !target) return false;
+  if (raw.includes(target)) return true;
+  // OCR이 '사 업 자 등 록 증', '인 감 증 명 서'처럼 띄엄띄엄 읽는 경우를 대비한다.
+  let pos = -1;
+  let hit = 0;
+  for (const ch of target) {
+    pos = raw.indexOf(ch, pos + 1);
+    if (pos === -1) break;
+    hit += 1;
+  }
+  return hit >= Math.ceil(target.length * 0.82);
+}
+
+function findHeuristicMatch(rawText, normalized, type) {
+  // 인감증명서는 사업자등록증으로 오분류되기 쉬우므로 최우선으로 막는다.
+  if (hasLooseTitle(rawText, "인감증명서") || normalized.includes("법인인감증명서") || normalized.includes("개인인감증명서")) {
+    return makeHeuristicMatch(type, "사용인감계", 94, "인감증명서", false);
+  }
+
+  if (hasLooseTitle(rawText, "사용인감계")) {
+    return makeHeuristicMatch(type, "사용인감계", 96, "사용인감계", false);
+  }
+
+  if (hasLooseTitle(rawText, "전문건설업등록증") || hasLooseTitle(rawText, "건설업등록증") || normalized.includes("전문건설업등록증") || normalized.includes("건설업등록증")) {
+    return makeHeuristicMatch(type, "공사 면허 등록증, 등록수첩", 94, "전문건설업등록증", false);
+  }
+
+  const constructionClues = countClues(normalized, ["등록번호", "업종", "상호", "대표자", "영업소", "소재지", "건설업", "전문건설", "등록수첩"]);
+  if (normalized.includes("별지제3호서식") && constructionClues >= 2) {
+    return makeHeuristicMatch(type, "공사 면허 등록증, 등록수첩", 78, "별지 제3호 서식 + 건설업 등록 단서", true);
+  }
+  if (normalized.includes("별지제3호서식") && constructionClues >= 1) {
+    return makeHeuristicMatch(type, "공사 면허 등록증, 등록수첩", 70, "별지 제3호 서식", true);
+  }
+
+  if (hasLooseTitle(rawText, "사업자등록증") || normalized.includes("사업자등록증명")) {
+    return makeHeuristicMatch(type, "사업자등록증 사본", 92, "사업자등록증", false);
+  }
+
+  const hasInk = normalized.includes("인감증명서") || normalized.includes("사용인감계");
+  const businessClues = countClues(normalized, ["사업자등록번호", "법인사업자", "개업연월일", "사업장소재지", "사업의종류", "업태", "종목", "상호", "성명", "대표자"]);
+  if (!hasInk && businessClues >= 4 && (normalized.includes("법인사업자") || normalized.includes("사업자등록번호"))) {
+    return makeHeuristicMatch(type, "사업자등록증 사본", 78, "사업자등록증 단서", true);
+  }
+  if (!hasInk && businessClues >= 3 && normalized.includes("법인사업자")) {
+    return makeHeuristicMatch(type, "사업자등록증 사본", 72, "법인사업자 단서", true);
+  }
+
+  return null;
 }
 
 function findPriorityMatch(normalized, type) {
@@ -1321,6 +1429,9 @@ function findBestMatch(text, type) {
   const normalized = normalizeText(text);
   if (!normalized) return null;
   const priority = findPriorityMatch(normalized, type);
+  if (priority && !priority.caution) return priority;
+  const heuristic = findHeuristicMatch(text, normalized, type);
+  if (heuristic && (!priority || priority.caution || heuristic.score >= priority.score)) return heuristic;
   if (priority) return priority;
   let best = null;
 

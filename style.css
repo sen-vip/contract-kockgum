@@ -968,3 +968,33 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
 @media (max-width: 640px) {
   .ocr-progress-box__head { align-items: flex-start; flex-direction: column; }
 }
+
+
+/* v0.1.9 스캔서류 확인필요 반영 UX */
+.page-result {
+  grid-template-columns: minmax(48px, 72px) minmax(110px, 1.15fr) 18px minmax(160px, 1.1fr) auto;
+}
+.page-result__apply {
+  border: 1px solid #fbbf24;
+  background: #fff7ed;
+  color: #92400e;
+  border-radius: 9px;
+  padding: 5px 9px;
+  font-weight: 900;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.page-result__apply:hover {
+  background: #ffedd5;
+}
+@media (max-width: 640px) {
+  .page-result {
+    grid-template-columns: 54px 1fr;
+  }
+  .page-result__apply {
+    grid-column: 2 / 3;
+    justify-self: start;
+    margin-top: 4px;
+  }
+}
