@@ -898,7 +898,7 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
 }
 
 
-/* v0.1.8 OCR 진행상태/확인필요 개선 */
+/* v0.1.10 OCR 진행상태/확인필요 개선 */
 .file-card--processing {
   border-color: #f6c76b;
   background: #fffbeb;
@@ -970,7 +970,7 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
 }
 
 
-/* v0.1.9 스캔서류 확인필요 반영 UX */
+/* v0.1.10 스캔서류 확인필요 반영 UX */
 .page-result {
   grid-template-columns: minmax(48px, 72px) minmax(110px, 1.15fr) 18px minmax(160px, 1.1fr) auto;
 }
@@ -993,6 +993,35 @@ h3 { margin: 0; font-size: 17px; letter-spacing: -0.02em; }
     grid-template-columns: 54px 1fr;
   }
   .page-result__apply {
+    grid-column: 2 / 3;
+    justify-self: start;
+    margin-top: 4px;
+  }
+}
+
+/* v0.1.10 빠른 OCR 기본 + 정밀 OCR 선택 */
+.danger-soft {
+  border-color: #fecaca !important;
+  background: #fff1f2 !important;
+  color: #be123c !important;
+}
+.page-result {
+  grid-template-columns: minmax(48px, 72px) minmax(110px, 1.15fr) 18px minmax(160px, 1.1fr) auto auto;
+}
+.page-result__precision {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-radius: 9px;
+  padding: 5px 9px;
+  font-weight: 900;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.page-result__precision:hover { background: #dbeafe; }
+@media (max-width: 640px) {
+  .page-result__precision {
     grid-column: 2 / 3;
     justify-self: start;
     margin-top: 4px;

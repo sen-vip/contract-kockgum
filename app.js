@@ -801,11 +801,12 @@ async function autoOcrUnmatched(files) {
     if (!record || record.ocrText) continue;
     if (!isOcrCandidate(file)) continue;
 
-    record.ocrStatus = "OCR 확인 중";
+    record.ocrStatus = "빠른 OCR 확인 중";
+    record.ocrStopRequested = false;
     record.ocrProgress = 0;
     record.ocrTotal = 0;
     record.ocrCurrentLabel = "준비 중";
-    if (!record.applied) record.status = record.status === "미분류" ? "OCR 확인 중" : record.status;
+    if (!record.applied) record.status = record.status === "미분류" ? "빠른 OCR 확인 중" : record.status;
     persistState();
     renderFiles();
 
@@ -813,9 +814,10 @@ async function autoOcrUnmatched(files) {
       record.ocrProgress = Number(progress.current || 0);
       record.ocrTotal = Number(progress.total || 0);
       record.ocrCurrentLabel = progress.label || "";
-      record.ocrStatus = record.ocrTotal ? `OCR 확인 중 ${record.ocrProgress}/${record.ocrTotal}쪽` : "OCR 확인 중";
+      record.ocrStatus = record.ocrTotal ? `빠른 OCR 확인 중 ${record.ocrProgress}/${record.ocrTotal}쪽` : "빠른 OCR 확인 중";
       persistState();
       renderFiles();
+      return !record.ocrStopRequested;
     };
 
     try {
@@ -889,6 +891,10 @@ async function autoOcrUnmatched(files) {
         record.status = record.applied ? record.status : "미분류";
         record.ocrStatus = "제목 확인 실패";
       }
+      if (record.ocrStopRequested) {
+        if (!autoCount && !recommendCount && !record.applied) record.status = "OCR 중단됨";
+        record.ocrStatus = `OCR 중단됨 · ${pageTexts.length}쪽까지 확인`;
+      }
       record.ocrProgress = 0;
       record.ocrTotal = 0;
       record.ocrCurrentLabel = "";
@@ -903,6 +909,83 @@ async function autoOcrUnmatched(files) {
     persistState();
     renderAll();
   }
+}
+
+async function runPrecisionOcrForPage(fileId, pageNumber, pageIndex) {
+  const file = transientFiles.get(fileId);
+  const record = getFileRecord(fileId);
+  if (!file || !record) {
+    toast("새로고침 후에는 보안상 원본 파일을 다시 선택해야 정밀 OCR이 가능해요.");
+    return;
+  }
+  if (getExt(file.name) !== "pdf") {
+    toast("정밀 OCR은 PDF 페이지에만 사용할 수 있어요.");
+    return;
+  }
+  record.ocrStatus = `정밀 OCR 확인 중 · ${pageNumber}쪽`;
+  record.ocrProgress = 0;
+  record.ocrTotal = 3;
+  record.ocrCurrentLabel = `${pageNumber}쪽 정밀 OCR`;
+  persistState();
+  renderFiles();
+  try {
+    const page = await extractSinglePdfPagePrecisionText(file, pageNumber, (progress = {}) => {
+      record.ocrProgress = Number(progress.current || 0);
+      record.ocrTotal = Number(progress.total || 3);
+      record.ocrCurrentLabel = progress.label || `${pageNumber}쪽 정밀 OCR`;
+      record.ocrStatus = `정밀 OCR 확인 중 ${record.ocrProgress}/${record.ocrTotal}`;
+      persistState();
+      renderFiles();
+    });
+    const match = findBestMatch(page.text || "", state.activeType);
+    if (!record.pageResults) record.pageResults = [];
+    const result = {
+      page: page.page,
+      pageLabel: page.pageLabel,
+      title: extractLikelyTitle(page.text) || "제목 확인 실패",
+      text: String(page.text || "").slice(0, 450),
+      status: "정밀 OCR 제목 확인 실패",
+      docId: "",
+      score: 0,
+    };
+    if (match?.sourceTerm && (!result.title || /별지|서식|제출용|제목 확인 실패|등록번호|상단|본문단서|법인|대표자|사업자번호/.test(result.title))) {
+      result.title = match.sourceTerm;
+    }
+    if (match && match.score >= 82 && !match.caution) {
+      cleanupGenericAttachmentForFile(record.name);
+      attachFileToDoc(match.docId, record.name, { pageLabel: page.pageLabel, silent: true });
+      if (!record.matchedDocIds) record.matchedDocIds = [];
+      if (!record.matchedDocIds.includes(match.docId)) record.matchedDocIds.push(match.docId);
+      record.matchedDocId = record.matchedDocIds[0] || match.docId;
+      record.applied = true;
+      result.status = match.sourceTerm && normalizeText(match.sourceTerm).includes("인감증명서") ? "사용인감계 관련 첨부 자동반영" : "정밀 OCR 자동반영";
+      result.docId = match.docId;
+      result.score = match.score;
+      toast(`${pageNumber}쪽을 체크리스트에 반영했어요.`);
+    } else if (match && match.score >= 45) {
+      result.status = match.caution ? "정밀 OCR 확인필요" : "정밀 OCR 추천";
+      result.docId = match.docId;
+      result.score = match.score;
+      if (!record.suggestionDocId) {
+        record.suggestionDocId = match.docId;
+        record.suggestionScore = match.score;
+      }
+      toast(`${pageNumber}쪽은 확인필요로 잡았어요.`);
+    } else {
+      toast(`${pageNumber}쪽 정밀 OCR도 제목을 확정하지 못했어요.`);
+    }
+    record.pageResults[pageIndex] = result;
+    record.ocrStatus = "정밀 OCR 완료";
+    record.ocrProgress = 0;
+    record.ocrTotal = 0;
+    record.ocrCurrentLabel = "";
+  } catch (error) {
+    console.warn("정밀 OCR 실패", error);
+    record.ocrStatus = "정밀 OCR 실패";
+    toast("정밀 OCR에 실패했어요. 직접 연결을 사용해 주세요.");
+  }
+  persistState();
+  renderAll();
 }
 
 function renderFiles() {
@@ -984,6 +1067,27 @@ function renderFiles() {
     });
   });
 
+  $$("[data-stop-ocr]", list).forEach((button) => {
+    button.addEventListener("click", () => {
+      const record = getFileRecord(button.dataset.stopOcr);
+      if (!record) return;
+      record.ocrStopRequested = true;
+      record.ocrStatus = "OCR 중단 요청됨";
+      persistState();
+      renderFiles();
+      toast("현재 쪽 확인이 끝나면 OCR을 멈출게요.");
+    });
+  });
+
+  $$("[data-run-page-ocr]", list).forEach((button) => {
+    button.addEventListener("click", async () => {
+      const fileId = button.dataset.runPageOcr;
+      const pageNumber = Number(button.dataset.pageNumber || 1);
+      const pageIndex = Number(button.dataset.pageIndex || pageNumber - 1);
+      await runPrecisionOcrForPage(fileId, pageNumber, pageIndex);
+    });
+  });
+
   $$("[data-remove-upload]", list).forEach((button) => {
     button.addEventListener("click", () => removeUpload(button.dataset.removeUpload));
   });
@@ -1008,7 +1112,7 @@ function renderFiles() {
 
 function isOcrProcessing(file) {
   const status = `${file?.status || ""} ${file?.ocrStatus || ""}`;
-  return /OCR 확인 중/.test(status);
+  return /(OCR 확인 중|빠른 OCR 확인 중|정밀 OCR 확인 중)/.test(status);
 }
 
 function renderOcrProgress(file) {
@@ -1025,7 +1129,7 @@ function renderOcrProgress(file) {
         <strong>${escapeHtml(label)}${escapeHtml(currentLabel)}</strong>
       </div>
       <div class="ocr-progress-track"><span style="width:${pct}%"></span></div>
-      <p>페이지별 제목 후보를 읽고 있어요. 스캔이 흐리면 확인필요로 남겨요.</p>
+      <p>기본 업로드는 빠른 OCR만 실행해요. 애매한 페이지만 정밀 OCR을 눌러 다시 확인하세요.</p>
     </div>
   `;
 }
@@ -1062,7 +1166,8 @@ function renderFileCard(file) {
       </div>
       <div class="file-actions">
         ${suggestion && !isApplied ? `<button type="button" class="primary" data-apply-suggestion="${escapeAttr(file.id)}">추천 적용</button>` : ""}
-        ${canOcr ? `<button type="button" class="soft" data-run-ocr="${escapeAttr(file.id)}">OCR 재확인</button>` : ""}
+        ${isProcessing ? `<button type="button" class="soft danger-soft" data-stop-ocr="${escapeAttr(file.id)}">OCR 중단</button>` : ""}
+        ${canOcr ? `<button type="button" class="soft" data-run-ocr="${escapeAttr(file.id)}">빠른 OCR 재확인</button>` : ""}
         <button type="button" data-remove-upload="${escapeAttr(file.id)}">삭제</button>
       </div>
       ${progressHtml}
@@ -1100,6 +1205,10 @@ function renderPageResults(results, file = null) {
         const applyButton = file && isPending && result.docId ? `
           <button type="button" class="page-result__apply" data-apply-page-doc="${escapeAttr(file.id)}" data-page-doc-id="${escapeAttr(result.docId)}" data-page-index="${index}" data-page-label="${escapeAttr(result.pageLabel || `${result.page}쪽`)}">반영</button>
         ` : "";
+        const canPrecision = file && !isDone && transientFiles.has(file.id) && getExt(file.name) === "pdf";
+        const precisionButton = canPrecision ? `
+          <button type="button" class="page-result__precision" data-run-page-ocr="${escapeAttr(file.id)}" data-page-number="${escapeAttr(result.page || index + 1)}" data-page-index="${index}">정밀 OCR</button>
+        ` : "";
         return `
           <div class="page-result ${statusClass}">
             <span class="page-result__page">${escapeHtml(result.pageLabel || `${result.page}쪽`)}</span>
@@ -1107,6 +1216,7 @@ function renderPageResults(results, file = null) {
             <span class="page-result__arrow">→</span>
             <span class="page-result__doc">${matched ? escapeHtml(`${matched.doc.stage} · ${matched.doc.name}`) : escapeHtml(result.status)}</span>
             ${applyButton}
+            ${precisionButton}
           </div>
         `;
       }).join("")}
@@ -1232,61 +1342,76 @@ async function extractPdfPageTitleTexts(file, onProgress = null) {
   const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
   const pageCount = Math.min(pdf.numPages || 1, 12);
   const results = [];
-  onProgress?.({ current: 0, total: pageCount, label: "PDF 준비" });
+  onProgress?.({ current: 0, total: pageCount, label: "빠른 OCR 준비" });
   for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
-    onProgress?.({ current: pageNumber - 1, total: pageCount, label: `${pageNumber}쪽 확인 중` });
-    const canvases = await pdfPageTitleCanvases(pdf, pageNumber);
-    const parts = [];
-    for (const item of canvases) {
-      const text = await recognizeCanvasOrImage(item.canvas);
-      if (text) parts.push(`[${item.label}] ${text}`);
+    if (onProgress?.({ current: pageNumber - 1, total: pageCount, label: `${pageNumber}쪽 빠른 확인 중`, shouldStop: true }) === false) break;
+    const item = await pdfPageQuickTitleCanvas(pdf, pageNumber);
+    let text = "";
+    try {
+      text = await recognizeCanvasOrImage(item.canvas);
+    } catch (error) {
+      console.warn(`${pageNumber}쪽 빠른 OCR 실패`, error);
     }
-    const text = mergeOcrTexts(parts);
-    results.push({ page: pageNumber, pageLabel: `${pageNumber}쪽`, text });
+    results.push({ page: pageNumber, pageLabel: `${pageNumber}쪽`, text: text ? `[${item.label}] ${text}` : "" });
     onProgress?.({ current: pageNumber, total: pageCount, label: `${pageNumber}쪽 완료` });
   }
   return results;
 }
 
-function mergeOcrTexts(parts = []) {
-  const seen = new Set();
-  return parts
-    .flatMap((part) => String(part).split(/\n+/))
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => {
-      const key = normalizeText(line);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .join("\n");
+async function extractSinglePdfPagePrecisionText(file, pageNumber, onProgress = null) {
+  if (!window.pdfjsLib) throw new Error("PDF.js를 불러오지 못했습니다.");
+  const data = await file.arrayBuffer();
+  const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
+  const safePage = Math.max(1, Math.min(Number(pageNumber || 1), pdf.numPages || 1));
+  const canvases = await pdfPagePrecisionTitleCanvases(pdf, safePage);
+  const parts = [];
+  for (let i = 0; i < canvases.length; i += 1) {
+    const item = canvases[i];
+    onProgress?.({ current: i, total: canvases.length, label: `${safePage}쪽 정밀 OCR ${i + 1}/${canvases.length}` });
+    try {
+      const text = await recognizeCanvasOrImage(item.canvas);
+      if (text) parts.push(`[${item.label}] ${text}`);
+    } catch (error) {
+      console.warn(`${safePage}쪽 ${item.label} 정밀 OCR 실패`, error);
+    }
+  }
+  onProgress?.({ current: canvases.length, total: canvases.length, label: `${safePage}쪽 정밀 OCR 완료` });
+  return { page: safePage, pageLabel: `${safePage}쪽`, text: mergeOcrTexts(parts) };
 }
 
-async function pdfPageTitleCanvases(pdf, pageNumber) {
+async function pdfPageQuickTitleCanvas(pdf, pageNumber) {
   const page = await pdf.getPage(pageNumber);
-  const viewport = page.getViewport({ scale: 2.55 });
+  // v0.1.10: 기본 업로드는 속도를 우선한다. 페이지당 한 번만, 제목이 주로 있는 상단~중앙만 읽는다.
+  const viewport = page.getViewport({ scale: 1.45 });
+  const fullCanvas = document.createElement("canvas");
+  const fullContext = fullCanvas.getContext("2d", { willReadFrequently: true });
+  fullCanvas.width = viewport.width;
+  fullCanvas.height = viewport.height;
+  await page.render({ canvasContext: fullContext, viewport }).promise;
+  return { label: "빠른OCR", canvas: cropAndPrepareCanvas(fullCanvas, 0.02, 0.58, 1.08) };
+}
+
+async function pdfPagePrecisionTitleCanvases(pdf, pageNumber) {
+  const page = await pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: 2.1 });
   const fullCanvas = document.createElement("canvas");
   const fullContext = fullCanvas.getContext("2d", { willReadFrequently: true });
   fullCanvas.width = viewport.width;
   fullCanvas.height = viewport.height;
   await page.render({ canvasContext: fullContext, viewport }).promise;
 
-  // v0.1.9: 스캔 보완서류는 제목 위치가 제각각이다.
-  // 상단 제목, 중앙 큰 제목, 본문 단서 영역을 나누어 읽고, 매칭 단계에서 안전하게 확인필요로 넘긴다.
+  // 사용자가 누른 한 페이지만 더 자세히 본다. 전체 PDF에는 절대 이 루틴을 자동으로 돌리지 않는다.
   const zones = [
     { label: "상단", y: 0, h: 0.38 },
     { label: "제목영역", y: 0.10, h: 0.42 },
     { label: "중앙영역", y: 0.20, h: 0.46 },
-    { label: "본문단서", y: 0.34, h: 0.56 },
   ];
-  return zones.map((zone) => ({ label: zone.label, canvas: cropAndPrepareCanvas(fullCanvas, zone.y, zone.h) }));
+  return zones.map((zone) => ({ label: zone.label, canvas: cropAndPrepareCanvas(fullCanvas, zone.y, zone.h, 1.22) }));
 }
 
-function cropAndPrepareCanvas(fullCanvas, yRatio, hRatio) {
+function cropAndPrepareCanvas(fullCanvas, yRatio, hRatio, scale = 1.12) {
   const sourceY = Math.max(0, Math.floor(fullCanvas.height * yRatio));
   const sourceH = Math.min(fullCanvas.height - sourceY, Math.floor(fullCanvas.height * hRatio));
-  const scale = 1.45;
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d", { willReadFrequently: true });
   canvas.width = Math.floor(fullCanvas.width * scale);

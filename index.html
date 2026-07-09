@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>계약콕검 v0.1.9</title>
+  <title>계약콕검 v0.1.10</title>
   <meta name="description" content="공사·용역·물품 계약서류 확인도구" />
   <link rel="stylesheet" href="./style.css" />
 </head>
@@ -145,11 +145,11 @@
           <input id="fileInput" type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.bmp,.hwp,.hwpx,.doc,.docx,.xls,.xlsx,.csv,.txt" />
           <div class="dropzone__inner">
             <strong>서류 파일을 여기에 놓거나 선택하세요</strong>
-            <span>파일명으로 맞는 서류는 자동 첨부확인 · 스캔 PDF/이미지는 OCR로 제목만 확인</span>
+            <span>파일명 자동 첨부확인 · PDF는 빠른 OCR 기본, 정밀 OCR은 선택</span>
             <button type="button" id="chooseFileBtn">파일 선택</button>
           </div>
         </div>
-        <p class="helper-text">파일명을 읽어 맞는 서류는 바로 체크리스트에 첨부확인으로 표시합니다. 보완서류처럼 여러 장이 합쳐진 PDF는 페이지별 제목 OCR로 확인합니다. 최종 판단은 담당자가 직접 확인하세요.</p>
+        <p class="helper-text">파일명을 읽어 맞는 서류는 바로 체크리스트에 첨부확인으로 표시합니다. 여러 장 PDF는 기본적으로 빠른 OCR만 실행하고, 애매한 페이지는 정밀 OCR을 눌러 추가 확인하세요. 최종 판단은 담당자가 직접 확인하세요.</p>
         <div class="file-list" id="fileList"></div>
       </section>
 
