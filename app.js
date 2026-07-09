@@ -210,6 +210,10 @@ const manualAliases = {
 };
 
 const priorityMatchers = [
+  { docName: "청렴서약서", terms: ["청렴계약이행서약서", "청렴계약 이행 서약서", "청렴이행서약서", "청렴서약서", "청렴계약이행", "청렴계약"] },
+  { docName: "수의계약 체결제한 여부 확인서", terms: ["수의계약체결제한여부확인서", "수의계약 체결 제한 여부 확인서", "수의계약체결 제한여부확인서", "체결제한여부확인서", "공직자의이해충돌방지법"] },
+  { docName: "수의계약 각서", terms: ["수의계약각서", "수의계약 각서", "수의계약배제사유"] },
+  { docName: "조세포탈 서약서", terms: ["조세포탈여부확인서약서", "조세포탈 여부 확인 서약서", "조세포탈서약서", "조세포탈"] },
   { docName: "공사 면허 등록증, 등록수첩", terms: ["전문건설업등록증", "건설업등록증", "건설업등록수첩", "전문공사업등록증", "공사업등록증", "건설업면허", "면허등록증"] },
   { docName: "사업자등록증 사본", terms: ["사업자등록증", "사업자 등록증", "사업자등록증명"] },
   { docName: "등기사항전부증명서(법인등기부등본)", terms: ["등기사항전부증명서", "법인등기부등본", "현재유효사항", "등기사항"] },
@@ -839,6 +843,7 @@ async function autoOcrUnmatched(files) {
           status: "제목 확인 실패",
           docId: "",
           score: 0,
+          reason: "",
         };
 
         if (isIntegratedPledgeText(pageText)) {
@@ -856,6 +861,7 @@ async function autoOcrUnmatched(files) {
         if (match?.sourceTerm && (!pageResult.title || /별지|서식|제출용|제목 확인 실패|등록번호|상단|본문단서|법인|대표자|사업자번호/.test(pageResult.title))) {
           pageResult.title = match.sourceTerm;
         }
+        if (match) pageResult.reason = getMatchReason(match);
         const needsHumanCheck = match && (match.score < 82 || match.caution);
         if (match && match.score >= 82 && !match.caution) {
           cleanupGenericAttachmentForFile(record.name);
@@ -947,10 +953,12 @@ async function runPrecisionOcrForPage(fileId, pageNumber, pageIndex) {
       status: "정밀 OCR 제목 확인 실패",
       docId: "",
       score: 0,
+      reason: "",
     };
     if (match?.sourceTerm && (!result.title || /별지|서식|제출용|제목 확인 실패|등록번호|상단|본문단서|법인|대표자|사업자번호/.test(result.title))) {
       result.title = match.sourceTerm;
     }
+    if (match) result.reason = getMatchReason(match);
     if (match && match.score >= 82 && !match.caution) {
       cleanupGenericAttachmentForFile(record.name);
       attachFileToDoc(match.docId, record.name, { pageLabel: page.pageLabel, silent: true });
@@ -1193,6 +1201,13 @@ function buildMatchedText(file, matched, matchedDocIds) {
   return "";
 }
 
+function getMatchReason(match) {
+  if (!match) return "";
+  if (match.caution) return "단서매칭 · 확인필요";
+  if (match.priority || match.score >= 95) return "제목 직접매칭";
+  return "제목 OCR 매칭";
+}
+
 function renderPageResults(results, file = null) {
   if (!results.length) return "";
   return `
@@ -1211,9 +1226,10 @@ function renderPageResults(results, file = null) {
         ` : "";
         const titleText = result.title || "제목 확인 실패";
         const docText = matched ? matched.doc.name : result.status;
+        const reasonText = result.reason ? ` · ${result.reason}` : "";
         const fullTooltip = matched
-          ? `${result.pageLabel || `${result.page}쪽`} · ${titleText} → ${matched.doc.name}`
-          : `${result.pageLabel || `${result.page}쪽`} · ${titleText} → ${docText}`;
+          ? `${result.pageLabel || `${result.page}쪽`} · ${titleText} → ${matched.doc.name}${reasonText}`
+          : `${result.pageLabel || `${result.page}쪽`} · ${titleText} → ${docText}${reasonText}`;
         return `
           <div class="page-result ${statusClass}" title="${escapeAttr(fullTooltip)}">
             <span class="page-result__page">${escapeHtml(result.pageLabel || `${result.page}쪽`)}</span>
@@ -1474,6 +1490,18 @@ function makeHeuristicMatch(type, docName, score, sourceTerm, caution = true) {
   return { docId, score, doc: getDocById(docId)?.doc, sourceTerm, priority: true, caution };
 }
 
+function hasAnyLooseTitle(rawText, titles = []) {
+  return titles.some((title) => hasLooseTitle(rawText, title));
+}
+
+function hasStrongBusinessExclusion(normalized) {
+  return /청렴|수의계약|체결제한|조세포탈|이해충돌방지법|서약서|확인서/.test(normalized) && !/사업자등록증|사업자등록증명|법인사업자/.test(normalized);
+}
+
+function hasStrongSealExclusion(normalized) {
+  return /청렴|수의계약체결제한|체결제한여부|조세포탈|이해충돌방지법/.test(normalized) && !/사용인감계|인감증명서|법인인감증명서|개인인감증명서/.test(normalized);
+}
+
 function hasLooseTitle(rawText, title) {
   const raw = compactHangul(rawText);
   const target = compactHangul(title);
@@ -1491,6 +1519,23 @@ function hasLooseTitle(rawText, title) {
 }
 
 function findHeuristicMatch(rawText, normalized, type) {
+  // 강한 제목이 보이면 본문 단서보다 먼저 확정한다.
+  if (hasAnyLooseTitle(rawText, ["청렴계약이행서약서", "청렴계약 이행 서약서", "청렴이행서약서", "청렴서약서"]) || /청렴계약이행서약서|청렴이행서약서|청렴서약서|청렴계약이행/.test(normalized)) {
+    return makeHeuristicMatch(type, "청렴서약서", 98, "청렴계약이행서약서", false);
+  }
+
+  if (hasAnyLooseTitle(rawText, ["수의계약 체결 제한 여부 확인서", "수의계약체결제한여부확인서", "체결제한여부확인서"]) || /수의계약체결제한여부확인서|체결제한여부확인서|수의계약체결제한/.test(normalized)) {
+    return makeHeuristicMatch(type, "수의계약 체결제한 여부 확인서", 98, "수의계약 체결 제한 여부 확인서", false);
+  }
+
+  if (hasAnyLooseTitle(rawText, ["수의계약 각서", "수의계약각서"]) || /수의계약각서/.test(normalized)) {
+    return makeHeuristicMatch(type, "수의계약 각서", 96, "수의계약 각서", false);
+  }
+
+  if (hasAnyLooseTitle(rawText, ["조세포탈 여부 확인 서약서", "조세포탈여부확인서약서", "조세포탈 서약서"]) || /조세포탈/.test(normalized)) {
+    return makeHeuristicMatch(type, "조세포탈 서약서", 96, "조세포탈 여부 확인 서약서", false);
+  }
+
   // 인감증명서는 사업자등록증으로 오분류되기 쉬우므로 최우선으로 막는다.
   if (hasLooseTitle(rawText, "인감증명서") || normalized.includes("법인인감증명서") || normalized.includes("개인인감증명서")) {
     return makeHeuristicMatch(type, "사용인감계", 94, "인감증명서", false);
@@ -1518,10 +1563,10 @@ function findHeuristicMatch(rawText, normalized, type) {
 
   const hasInk = normalized.includes("인감증명서") || normalized.includes("사용인감계");
   const businessClues = countClues(normalized, ["사업자등록번호", "법인사업자", "개업연월일", "사업장소재지", "사업의종류", "업태", "종목", "상호", "성명", "대표자"]);
-  if (!hasInk && businessClues >= 4 && (normalized.includes("법인사업자") || normalized.includes("사업자등록번호"))) {
+  if (!hasInk && !hasStrongBusinessExclusion(normalized) && businessClues >= 4 && (normalized.includes("법인사업자") || normalized.includes("사업자등록번호"))) {
     return makeHeuristicMatch(type, "사업자등록증 사본", 78, "사업자등록증 단서", true);
   }
-  if (!hasInk && businessClues >= 3 && normalized.includes("법인사업자")) {
+  if (!hasInk && !hasStrongBusinessExclusion(normalized) && businessClues >= 3 && normalized.includes("법인사업자")) {
     return makeHeuristicMatch(type, "사업자등록증 사본", 72, "법인사업자 단서", true);
   }
 
@@ -1550,7 +1595,9 @@ function isCautionPriorityMatch(docName, normTerm, normalized) {
     const hasDirectTitle = normalized.includes("사업자등록증") || normalized.includes("사업자등록증명");
     if (!hasDirectTitle) return true;
     if (normalized.includes("인감증명서") || normalized.includes("사용인감계")) return true;
+    if (/청렴|수의계약|체결제한|조세포탈|서약서|확인서/.test(normalized)) return true;
   }
+  if (docName === "사용인감계" && hasStrongSealExclusion(normalized)) return true;
   if (docName === "등기사항전부증명서(법인등기부등본)" && normTerm === "현재유효사항" && !normalized.includes("등기사항전부증명서")) return true;
   return false;
 }
@@ -1645,6 +1692,8 @@ function isGenericOrUnsafeMatch(name, sourceTerm, normalizedText) {
 
 function applyOverMatchPenalty(name, normalizedText) {
   const normName = normalizeText(name);
+  if (normName === "사업자등록증사본" && /청렴|수의계약|체결제한|조세포탈|서약서|확인서/.test(normalizedText) && !/사업자등록증|사업자등록증명/.test(normalizedText)) return 92;
+  if (normName === "사용인감계" && hasStrongSealExclusion(normalizedText)) return 92;
   if (normName === "계약서" && /청렴서약서|조세포탈서약서|계약보증|수의계약/.test(normalizedText)) return 50;
   if (normName === "인지세" && /납세|지방세|국세/.test(normalizedText)) return 30;
   if (normName === "견적서" && /산출내역서|내역서/.test(normalizedText)) return 18;
